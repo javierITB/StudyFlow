@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-in-out forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.note-yellow {
+  background-color: #fef08a;
+  border-color: #eab308;
+  color: #713f12;
+}
+.note-cyan {
+  background-color: #bae6fd;
+  border-color: #0284c7;
+  color: #0c4a6e;
+}
+.note-green {
+  background-color: #bbf7d0;
+  border-color: #16a34a;
+  color: #14532d;
+}
+.note-lavender {
+  background-color: #e9d5ff;
+  border-color: #9333ea;
+  color: #581c87;
+}
+
+.cursor-crosshair-mode {
+  cursor: crosshair !important;
+}
+
+/* Estilos limpios para contenido DOCX paginado dentro de hoja clara */
+.docx-sheet-content {
+  color: #0f172a;
+  font-family: 'Inter', system-ui, sans-serif;
+  line-height: 1.6;
+  font-size: 14px;
+}
+.docx-sheet-content h1 {
+  font-size: 1.55em;
+  font-weight: 700;
+  margin: 0.7em 0 0.35em;
+  color: #020617;
+}
+.docx-sheet-content h2 {
+  font-size: 1.3em;
+  font-weight: 700;
+  margin: 0.65em 0 0.3em;
+  color: #0f172a;
+}
+.docx-sheet-content h3 {
+  font-size: 1.12em;
+  font-weight: 600;
+  margin: 0.55em 0 0.25em;
+  color: #1e293b;
+}
+.docx-sheet-content p {
+  margin: 0 0 0.65em;
+}
+.docx-sheet-content ul,
+.docx-sheet-content ol {
+  margin: 0.35em 0 0.75em 1.4em;
+}
+.docx-sheet-content ul {
+  list-style-type: disc;
+}
+.docx-sheet-content ol {
+  list-style-type: decimal;
+}
+.docx-sheet-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 0.92em;
+}
+.docx-sheet-content th,
+.docx-sheet-content td {
+  border: 1px solid #cbd5e1;
+  padding: 6px 8px;
+  text-align: left;
+}
+.docx-sheet-content th {
+  background-color: #f1f5f9;
+  font-weight: 600;
+}
+.docx-sheet-content img {
+  max-width: 100%;
+  height: auto;
+  margin: 0.5em 0;
+  border-radius: 4px;
+}
+.docx-sheet-content blockquote {
+  border-left: 3px solid #6366f1;
+  padding-left: 0.75em;
+  color: #334155;
+  margin: 0.5em 0;
+}
+

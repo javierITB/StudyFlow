@@ -1,0 +1,2119 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StudyFlow - Plataforma Integral de Estudio</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PDF.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- jsPDF CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- Google Font: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              200: '#c7d2fe',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              800: '#3730a3',
+              900: '#312e81',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Scrollbar estilizada */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    /* Animaciones suaves */
+    .fade-in {
+      animation: fadeIn 0.2s ease-in-out forwards;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    /* Estilos de Post-it */
+    .note-yellow { background-color: #fef08a; border-color: #eab308; color: #713f12; }
+    .note-cyan { background-color: #bae6fd; border-color: #0284c7; color: #0c4a6e; }
+    .note-green { background-color: #bbf7d0; border-color: #16a34a; color: #14532d; }
+    .note-lavender { background-color: #e9d5ff; border-color: #9333ea; color: #581c87; }
+    
+    .cursor-crosshair-mode {
+      cursor: crosshair !important;
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans overflow-hidden bg-slate-950 text-slate-100">
+
+  <!-- ================= TOP NAVIGATION BAR ================= -->
+  <header class="h-14 border-b border-slate-800 bg-slate-900/90 backdrop-blur flex items-center justify-between px-4 z-40 select-none">
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+          StudyFlow
+          <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">Pro</span>
+        </h1>
+      </div>
+    </div>
+
+    <!-- Navegacion de Modulos -->
+    <nav class="flex items-center space-x-1 sm:space-x-2 bg-slate-950/70 p-1 rounded-xl border border-slate-800">
+      <button id="nav-btn-docs" onclick="switchModule('docs')" class="module-tab px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 transition-all bg-indigo-600 text-white shadow-sm">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <span class="hidden sm:inline">Material y Visor</span>
+      </button>
+
+      <button id="nav-btn-pomodoro" onclick="switchModule('pomodoro')" class="module-tab px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/60">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span class="hidden sm:inline">Pomodoro y Plan</span>
+      </button>
+
+      <button id="nav-btn-board" onclick="switchModule('board')" class="module-tab px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/60">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/>
+        </svg>
+        <span class="hidden sm:inline">Pizarra y Exportacion</span>
+      </button>
+    </nav>
+
+    <!-- Resumen rapido en Navbar -->
+    <div class="flex items-center space-x-2 text-xs">
+      <div id="quick-pomodoro-status" class="hidden md:flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300">
+        <span class="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+        <span id="quick-timer-label">25:00</span>
+      </div>
+      <button onclick="toggleAudio()" id="audio-toggle-btn" title="Activar/Desactivar Sonido" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300">
+        <svg id="audio-icon-on" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+        </svg>
+        <svg id="audio-icon-off" class="w-4 h-4 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= MAIN CONTENT CONTAINER ================= -->
+  <main class="flex-1 overflow-hidden relative">
+
+    <!-- ================= MODULO 1: DOCUMENTOS Y VISOR PDF ================= -->
+    <div id="module-docs" class="h-full flex flex-col md:flex-row overflow-hidden">
+      
+      <!-- Panel Lateral: Gestor de Archivos y Material -->
+      <aside class="w-full md:w-80 lg:w-96 border-r border-slate-800 bg-slate-900/60 flex flex-col flex-shrink-0 h-1/3 md:h-full overflow-hidden">
+        
+        <!-- Encabezado y subida -->
+        <div class="p-4 border-b border-slate-800 space-y-3">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Archivos de Estudio</h2>
+            <span id="doc-counter-badge" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">0 docs</span>
+          </div>
+
+          <!-- Zona Drag and Drop -->
+          <div id="drop-zone" class="border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-xl p-4 text-center cursor-pointer transition-colors bg-slate-950/40">
+            <input type="file" id="file-input" accept="application/pdf" multiple class="hidden" onchange="handleFileSelect(event)">
+            <div class="flex flex-col items-center pointer-events-none">
+              <svg class="w-8 h-8 text-indigo-400 mb-1" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+              </svg>
+              <p class="text-xs font-medium text-slate-200">Arrastra PDFs o haz clic</p>
+              <p class="text-[10px] text-slate-400 mt-0.5">Almacenamiento local persistente</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Lista de Documentos Cargados -->
+        <div class="flex-1 overflow-y-auto p-3 space-y-2" id="document-list-container">
+          <!-- Vacio por defecto -->
+          <div id="no-docs-message" class="text-center py-10 px-4 text-slate-400">
+            <svg class="w-10 h-10 mx-auto text-slate-600 mb-2" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+            </svg>
+            <p class="text-xs font-medium text-slate-400">Sin documentos cargados</p>
+            <p class="text-[11px] text-slate-400 mt-1">Sube tus apuntes para iniciar el visor y calcular los pomodoros.</p>
+          </div>
+        </div>
+
+        <!-- Indicador de Almacenamiento -->
+        <div class="p-3 border-t border-slate-800 bg-slate-900/80 flex items-center justify-between text-[11px] text-slate-400">
+          <span>Base de datos: IndexedDB</span>
+          <span id="storage-status-text">Listo</span>
+        </div>
+      </aside>
+
+      <!-- Area Central: Visor PDF con Notas Interactivas -->
+      <section class="flex-1 flex flex-col h-2/3 md:h-full bg-slate-950 overflow-hidden relative">
+        
+        <!-- Barra de herramientas del visor -->
+        <div class="h-12 border-b border-slate-800 bg-slate-900/90 px-3 flex items-center justify-between flex-shrink-0 z-20">
+          <!-- Controles de pagina -->
+          <div class="flex items-center space-x-1.5">
+            <button onclick="prevPage()" id="btn-prev-page" title="Pagina anterior" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:pointer-events-none">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+              </svg>
+            </button>
+            <div class="flex items-center text-xs text-slate-300 font-mono">
+              <input type="number" id="current-page-num" min="1" value="1" onchange="goToPageInput(this.value)" class="w-12 text-center bg-slate-950 border border-slate-700 rounded-md py-0.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+              <span class="mx-1 text-slate-400">/</span>
+              <span id="total-pages-count">0</span>
+            </div>
+            <button onclick="nextPage()" id="btn-next-page" title="Pagina siguiente" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:pointer-events-none">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Controles de Zoom -->
+          <div class="hidden sm:flex items-center space-x-1">
+            <button onclick="zoomOut()" title="Alejar" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M20 12H4"/>
+              </svg>
+            </button>
+            <span id="zoom-level-text" class="text-xs font-mono text-slate-300 px-1.5">100%</span>
+            <button onclick="zoomIn()" title="Acercar" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+              </svg>
+            </button>
+            <button onclick="fitToWidth()" title="Ajustar al ancho" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2">
+              Ajustar
+            </button>
+          </div>
+
+          <!-- Herramientas de Post-it -->
+          <div class="flex items-center space-x-2">
+            <div class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800">
+              <button onclick="setSelectedColor('yellow')" title="Nota Amarilla" id="color-pick-yellow" class="w-4 h-4 rounded-full bg-amber-300 border-2 border-white transition-transform scale-110"></button>
+              <button onclick="setSelectedColor('cyan')" title="Nota Celeste" id="color-pick-cyan" class="w-4 h-4 rounded-full bg-sky-300 border border-transparent"></button>
+              <button onclick="setSelectedColor('green')" title="Nota Verde" id="color-pick-green" class="w-4 h-4 rounded-full bg-emerald-300 border border-transparent"></button>
+              <button onclick="setSelectedColor('lavender')" title="Nota Lavanda" id="color-pick-lavender" class="w-4 h-4 rounded-full bg-purple-300 border border-transparent"></button>
+            </div>
+
+            <button id="toggle-sticky-mode-btn" onclick="toggleStickyMode()" class="px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-700 bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/>
+              </svg>
+              <span id="sticky-btn-text">Pegar Nota</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Visor Canvas Scrollable Container -->
+        <div id="pdf-scroll-container" class="flex-1 overflow-auto p-4 flex justify-center items-start bg-slate-950">
+          
+          <!-- Mensaje cuando no hay documento seleccionado -->
+          <div id="empty-viewer-state" class="m-auto text-center py-20 px-4">
+            <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600">
+              <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>
+              </svg>
+            </div>
+            <h3 class="text-sm font-semibold text-slate-300">Selecciona o carga un documento</h3>
+            <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">Tus archivos se procesan de forma local en tu navegador con total privacidad.</p>
+          </div>
+
+          <!-- Canvas y Capa de Notas -->
+          <div id="pdf-canvas-wrapper" class="relative hidden shadow-2xl rounded-sm overflow-visible bg-white">
+            <canvas id="pdf-render-canvas" class="block"></canvas>
+            <!-- Overlay interactivo para fijar y mostrar notas -->
+            <div id="notes-overlay-layer" class="absolute inset-0 select-none" onclick="handleOverlayClick(event)"></div>
+          </div>
+
+        </div>
+
+        <!-- Barra inferior del visor -->
+        <div id="viewer-status-bar" class="h-8 border-t border-slate-800 bg-slate-900/60 px-4 flex items-center justify-between text-[11px] text-slate-400">
+          <span id="viewer-doc-title" class="truncate max-w-xs md:max-w-md">Sin archivo abierto</span>
+          <span id="viewer-notes-count" class="font-mono">0 notas en esta pagina</span>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ================= MODULO 2: POMODORO Y PLANIFICADOR INTELIGENTE ================= -->
+    <div id="module-pomodoro" class="h-full hidden overflow-y-auto p-4 md:p-6 lg:p-8 bg-slate-950">
+      <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Columna Izquierda: Planificador Matemático vinculado a Deadline y Páginas -->
+        <div class="lg:col-span-5 space-y-6">
+          
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-5">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                  </svg>
+                  Planificador por Fecha Limite
+                </h3>
+                <p class="text-[11px] text-slate-400 mt-0.5">Calculo dinamico de carga de lectura y pomodoros requeridos</p>
+              </div>
+            </div>
+
+            <!-- Parametros de Configuracion -->
+            <div class="space-y-4 text-xs">
+              <div>
+                <label class="block font-medium text-slate-300 mb-1">Fecha y Hora Limite (Deadline)</label>
+                <input type="datetime-local" id="planner-deadline-input" onchange="updatePlannerCalculations()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs">
+              </div>
+
+              <div>
+                <label class="block font-medium text-slate-300 mb-1">Velocidad de estudio (Minutos por Pagina)</label>
+                <div class="flex items-center space-x-2">
+                  <input type="number" id="planner-speed-input" min="1" max="60" value="3" onchange="updatePlannerCalculations()" class="w-24 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs">
+                  <span class="text-slate-400 text-[11px]">min/pag (por defecto 3 min/pag)</span>
+                </div>
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="font-medium text-slate-300">Material incluido en el plan</label>
+                  <button onclick="toggleSelectAllDocsForPlan()" class="text-[10px] text-indigo-400 hover:text-indigo-300 underline">Alternar todos</button>
+                </div>
+                <div id="planner-docs-checkbox-list" class="max-h-36 overflow-y-auto space-y-1.5 bg-slate-950/50 p-2.5 rounded-lg border border-slate-800">
+                  <p class="text-[11px] text-slate-400 italic">No hay documentos registrados aun.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel de Resultados Matematicos -->
+            <div class="bg-slate-950 rounded-xl p-4 border border-slate-800 space-y-3">
+              <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                <span>Diagnostico de Viabilidad</span>
+                <span id="feasibility-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300">Sin datos</span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2 text-center pt-1">
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                  <div class="text-[10px] text-slate-400 font-medium">Paginas Totales</div>
+                  <div id="calc-total-pages" class="text-lg font-bold text-white font-mono mt-0.5">0</div>
+                </div>
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                  <div class="text-[10px] text-slate-400 font-medium">Tiempo Lectura</div>
+                  <div id="calc-study-time" class="text-lg font-bold text-indigo-400 font-mono mt-0.5">0h 0m</div>
+                </div>
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                  <div class="text-[10px] text-slate-400 font-medium">Horas hasta Limite</div>
+                  <div id="calc-hours-left" class="text-lg font-bold text-amber-400 font-mono mt-0.5">--</div>
+                </div>
+                <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                  <div class="text-[10px] text-slate-400 font-medium">Pomodoros Requeridos</div>
+                  <div id="calc-pomodoros-needed" class="text-lg font-bold text-emerald-400 font-mono mt-0.5">0</div>
+                </div>
+              </div>
+
+              <div class="text-[11px] text-slate-300 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80" id="planner-recommendation-text">
+                Ingresa tu fecha limite y selecciona documentos para generar el pronostico de ritmo de estudio diario.
+              </div>
+
+              <button onclick="applyCalculatedPlanToTimer()" class="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs transition-colors shadow-sm flex items-center justify-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                Aplicar Calculo al Temporizador
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Columna Central: Reloj Pomodoro Interactivo -->
+        <div class="lg:col-span-7 space-y-6">
+          
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col items-center">
+            
+            <!-- Modos del Pomodoro -->
+            <div class="flex items-center space-x-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 mb-6">
+              <button onclick="setTimerMode('study')" id="timer-mode-study" class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-sm transition-all">Estudio</button>
+              <button onclick="setTimerMode('short')" id="timer-mode-short" class="px-4 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all">Descanso Corto</button>
+              <button onclick="setTimerMode('long')" id="timer-mode-long" class="px-4 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all">Descanso Largo</button>
+            </div>
+
+            <!-- Dial Circular del Temporizador -->
+            <div class="relative w-64 h-64 flex items-center justify-center my-2">
+              <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                <!-- Circulo de fondo -->
+                <circle cx="50" cy="50" r="44" stroke="currentColor" stroke-width="6" class="text-slate-800" fill="transparent"/>
+                <!-- Circulo de progreso -->
+                <circle id="timer-progress-ring" cx="50" cy="50" r="44" stroke="currentColor" stroke-width="6" stroke-dasharray="276.46" stroke-dashoffset="0" stroke-linecap="round" class="text-indigo-500 transition-all duration-300" fill="transparent"/>
+              </svg>
+
+              <!-- Texto Digital Central -->
+              <div class="absolute flex flex-col items-center justify-center text-center">
+                <span id="timer-display" class="text-5xl font-extrabold tracking-tight font-mono text-white">25:00</span>
+                <span id="timer-mode-label" class="text-xs font-medium uppercase tracking-widest text-indigo-400 mt-2">Sesion de Estudio</span>
+                <span id="timer-cycle-count" class="text-[11px] text-slate-400 mt-0.5">Pomodoro #1</span>
+              </div>
+            </div>
+
+            <!-- Controles del Temporizador -->
+            <div class="flex items-center space-x-4 mt-6">
+              <button onclick="resetTimer()" title="Reiniciar" class="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+              </button>
+
+              <button onclick="toggleTimer()" id="timer-start-btn" class="px-8 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2">
+                <svg id="timer-play-icon" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <svg id="timer-pause-icon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <span id="timer-btn-text">Iniciar Sesion</span>
+              </button>
+
+              <button onclick="skipTimerCycle()" title="Saltar al siguiente ciclo" class="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z"/>
+                </svg>
+              </button>
+            </div>
+
+            <!-- Progreso hacia el objetivo -->
+            <div class="w-full mt-6 pt-4 border-t border-slate-800">
+              <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+                <span>Progreso hacia la meta de estudio</span>
+                <span id="pomodoro-progress-ratio" class="font-mono text-slate-200">0 / 0 Pomodoros</span>
+              </div>
+              <div class="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                <div id="pomodoro-goal-bar" class="bg-indigo-500 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Modulo To-Do List Integrado -->
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                  </svg>
+                  Lista de Tareas de Estudio
+                </h3>
+                <p class="text-[11px] text-slate-400 mt-0.5">Organiza entregas vinculadas a tus documentos y sesiones</p>
+              </div>
+
+              <!-- Filtros de Tareas -->
+              <div class="flex items-center space-x-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-[11px]">
+                <button onclick="filterTasks('all')" id="filter-task-all" class="px-2 py-0.5 rounded font-medium bg-slate-800 text-white">Todas</button>
+                <button onclick="filterTasks('pending')" id="filter-task-pending" class="px-2 py-0.5 rounded font-medium text-slate-400 hover:text-white">Pendientes</button>
+                <button onclick="filterTasks('completed')" id="filter-task-completed" class="px-2 py-0.5 rounded font-medium text-slate-400 hover:text-white">Completas</button>
+              </div>
+            </div>
+
+            <!-- Formulario para agregar tarea -->
+            <form onsubmit="addTask(event)" class="flex flex-col sm:flex-row gap-2">
+              <input type="text" id="task-input-title" placeholder="Descripcion de la tarea o meta de lectura..." required class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+              
+              <select id="task-input-doc" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 max-w-xs">
+                <option value="">(Sin vincular a archivo)</option>
+              </select>
+
+              <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 flex-shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                </svg>
+                Agregar
+              </button>
+            </form>
+
+            <!-- Lista de Tareas -->
+            <div id="tasks-list-container" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+              <p class="text-xs text-slate-400 text-center py-4">No hay tareas creadas.</p>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ================= MODULO 3: PIZARRA INTERACTIVA Y EXPORTACION ================= -->
+    <div id="module-board" class="h-full hidden flex flex-col bg-slate-950 overflow-hidden">
+      
+      <!-- Toolbar de la Pizarra -->
+      <div class="h-14 border-b border-slate-800 bg-slate-900/90 px-4 flex items-center justify-between flex-shrink-0 z-20">
+        <div class="flex items-center space-x-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+            </svg>
+            <h2 class="text-sm font-bold text-white tracking-tight">Pizarra de Notas y Apuntes</h2>
+          </div>
+          <span class="text-slate-700 hidden sm:inline">|</span>
+          <!-- Filtro de Documento -->
+          <div class="flex items-center space-x-2">
+            <span class="text-xs text-slate-400 hidden sm:inline">Filtrar por archivo:</span>
+            <select id="board-filter-doc" onchange="renderWhiteboard()" class="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500">
+              <option value="all">Todos los documentos</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+          <!-- Boton Crear Nota Directa en Pizarra -->
+          <button onclick="openCreateDirectNoteModal()" class="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 flex items-center gap-1.5 transition-colors">
+            <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+            </svg>
+            <span>Nueva Nota</span>
+          </button>
+
+          <!-- Boton Exportar a PDF -->
+          <button onclick="exportNotesToPdf()" class="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white flex items-center gap-1.5 transition-colors shadow-sm">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            <span>Exportar Apuntes a PDF</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Lienzo con Zonas de Agrupacion (Swimlanes / Secciones de Pizarra) -->
+      <div class="flex-1 overflow-x-auto overflow-y-auto p-4 md:p-6 bg-slate-950">
+        <div class="min-w-[900px] h-full grid grid-cols-4 gap-4">
+          
+          <!-- Zona 1: Ideas Clave -->
+          <div class="bg-slate-900/70 border border-slate-800 rounded-2xl flex flex-col overflow-hidden drop-zone-column" data-zone="ideas" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'ideas')">
+            <div class="p-3 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Ideas Clave</h3>
+              </div>
+              <span id="zone-count-ideas" class="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded-full text-slate-300">0</span>
+            </div>
+            <div id="board-zone-ideas" class="flex-1 p-3 overflow-y-auto space-y-3">
+              <!-- Notas inyectadas dinamicamente -->
+            </div>
+          </div>
+
+          <!-- Zona 2: Preguntas y Repaso -->
+          <div class="bg-slate-900/70 border border-slate-800 rounded-2xl flex flex-col overflow-hidden drop-zone-column" data-zone="preguntas" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'preguntas')">
+            <div class="p-3 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
+                <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Preguntas y Repaso</h3>
+              </div>
+              <span id="zone-count-preguntas" class="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded-full text-slate-300">0</span>
+            </div>
+            <div id="board-zone-preguntas" class="flex-1 p-3 overflow-y-auto space-y-3">
+              <!-- Notas inyectadas dinamicamente -->
+            </div>
+          </div>
+
+          <!-- Zona 3: Resumen y Sintesis -->
+          <div class="bg-slate-900/70 border border-slate-800 rounded-2xl flex flex-col overflow-hidden drop-zone-column" data-zone="resumen" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'resumen')">
+            <div class="p-3 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Resumen y Sintesis</h3>
+              </div>
+              <span id="zone-count-resumen" class="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded-full text-slate-300">0</span>
+            </div>
+            <div id="board-zone-resumen" class="flex-1 p-3 overflow-y-auto space-y-3">
+              <!-- Notas inyectadas dinamicamente -->
+            </div>
+          </div>
+
+          <!-- Zona 4: Tareas Derivadas -->
+          <div class="bg-slate-900/70 border border-slate-800 rounded-2xl flex flex-col overflow-hidden drop-zone-column" data-zone="tareas" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'tareas')">
+            <div class="p-3 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-purple-400"></span>
+                <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Tareas y Acciones</h3>
+              </div>
+              <span id="zone-count-tareas" class="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded-full text-slate-300">0</span>
+            </div>
+            <div id="board-zone-tareas" class="flex-1 p-3 overflow-y-auto space-y-3">
+              <!-- Notas inyectadas dinamicamente -->
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ================= MODALES Y NOTIFICACIONES ================= -->
+
+  <!-- Modal Generico de Confirmacion / Alerta (Sin alert ni confirm nativo) -->
+  <div id="custom-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm hidden fade-in">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center space-x-3">
+        <div id="modal-icon-container" class="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 id="modal-title" class="text-sm font-bold text-white">Mensaje del Sistema</h3>
+          <p id="modal-subtitle" class="text-xs text-slate-400 mt-0.5">Notificacion de StudyFlow</p>
+        </div>
+      </div>
+      <p id="modal-body" class="text-xs text-slate-300 leading-relaxed"></p>
+      <div class="flex items-center justify-end space-x-2 pt-2">
+        <button id="modal-cancel-btn" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 transition-colors">Cancelar</button>
+        <button id="modal-confirm-btn" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white transition-colors">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para Crear Nota Manual / Directa en Pizarra -->
+  <div id="direct-note-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm hidden fade-in">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-sm font-bold text-white">Nueva Nota de Pizarra</h3>
+        <button onclick="closeDirectNoteModal()" class="text-slate-400 hover:text-white">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-medium text-slate-300 mb-1">Zona de Destino</label>
+          <select id="direct-note-zone" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-slate-200">
+            <option value="ideas">Ideas Clave</option>
+            <option value="preguntas">Preguntas y Repaso</option>
+            <option value="resumen">Resumen y Sintesis</option>
+            <option value="tareas">Tareas y Acciones</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block font-medium text-slate-300 mb-1">Documento Asociado (Opcional)</label>
+          <select id="direct-note-doc" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-slate-200">
+            <option value="">(Nota General - Sin Documento)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block font-medium text-slate-300 mb-1">Color de la Nota</label>
+          <div class="flex items-center space-x-3">
+            <label class="flex items-center space-x-1.5 cursor-pointer">
+              <input type="radio" name="direct-color" value="yellow" checked class="text-amber-500">
+              <span class="text-slate-300">Amarillo</span>
+            </label>
+            <label class="flex items-center space-x-1.5 cursor-pointer">
+              <input type="radio" name="direct-color" value="cyan" class="text-sky-500">
+              <span class="text-slate-300">Celeste</span>
+            </label>
+            <label class="flex items-center space-x-1.5 cursor-pointer">
+              <input type="radio" name="direct-color" value="green" class="text-emerald-500">
+              <span class="text-slate-300">Verde</span>
+            </label>
+            <label class="flex items-center space-x-1.5 cursor-pointer">
+              <input type="radio" name="direct-color" value="lavender" class="text-purple-500">
+              <span class="text-slate-300">Lavanda</span>
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-medium text-slate-300 mb-1">Contenido de la Nota</label>
+          <textarea id="direct-note-text" rows="4" placeholder="Escribe tus conclusiones, dudas o recordatorios..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"></textarea>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end space-x-2 pt-2">
+        <button onclick="closeDirectNoteModal()" class="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-300">Cancelar</button>
+        <button onclick="submitDirectNote()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white">Guardar en Pizarra</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contenedor Flotante de Notificaciones Toast -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- ================= JAVASCRIPT LOGIC ================= -->
+  <script>
+    /* Configuracion de PDF.js */
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    /* ================= ESTADO GLOBAL ================= */
+    const AppState = {
+      currentModule: 'docs', // 'docs', 'pomodoro', 'board'
+      db: null,
+      documents: [],
+      activeDocId: null,
+      activePdfDoc: null,
+      currentPage: 1,
+      totalPages: 0,
+      zoom: 1.0,
+      stickyMode: false,
+      selectedColor: 'yellow', // 'yellow', 'cyan', 'green', 'lavender'
+      notes: [],
+      tasks: [],
+      taskFilter: 'all',
+      audioEnabled: true,
+      audioCtx: null,
+
+      // Pomodoro & Planner State
+      planner: {
+        deadline: '',
+        speedMinPerPage: 3,
+        selectedDocIds: [],
+        calculatedPomodoros: 0,
+        calculatedWorkMinutes: 25
+      },
+      timer: {
+        mode: 'study', // 'study', 'short', 'long'
+        studyDuration: 25 * 60,
+        shortDuration: 5 * 60,
+        longDuration: 15 * 60,
+        remainingSeconds: 25 * 60,
+        isRunning: false,
+        intervalId: null,
+        cyclesCompleted: 0,
+        totalPlannedPomodoros: 0
+      }
+    };
+
+    /* ================= INDEXEDDB ENGINE ================= */
+    const DB_NAME = 'StudyFlow_Persistent_DB';
+    const DB_VERSION = 1;
+
+    function initDatabase() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+        request.onupgradeneeded = (event) => {
+          const db = event.target.result;
+          
+          // Almacen de Documentos (PDFs completos en Blob/ArrayBuffer)
+          if (!db.objectStoreNames.contains('documents')) {
+            const docStore = db.createObjectStore('documents', { keyPath: 'id' });
+            docStore.createIndex('uploadDate', 'uploadDate', { unique: false });
+          }
+
+          // Almacen de Notas Adhesivas / Post-its
+          if (!db.objectStoreNames.contains('notes')) {
+            const noteStore = db.createObjectStore('notes', { keyPath: 'id' });
+            noteStore.createIndex('docId', 'docId', { unique: false });
+            noteStore.createIndex('zone', 'zone', { unique: false });
+          }
+
+          // Almacen de Tareas (To-Do List)
+          if (!db.objectStoreNames.contains('tasks')) {
+            db.createObjectStore('tasks', { keyPath: 'id' });
+          }
+
+          // Almacen de Configuracion / Metadatos
+          if (!db.objectStoreNames.contains('settings')) {
+            db.createObjectStore('settings', { keyPath: 'key' });
+          }
+        };
+
+        request.onsuccess = (event) => {
+          AppState.db = event.target.result;
+          resolve(AppState.db);
+        };
+
+        request.onerror = (event) => {
+          console.error("IndexedDB Error:", event.target.error);
+          reject(event.target.error);
+        };
+      });
+    }
+
+    // Funciones DB genericas
+    function dbPut(storeName, data) {
+      return new Promise((resolve, reject) => {
+        const tx = AppState.db.transaction([storeName], 'readwrite');
+        const store = tx.objectStore(storeName);
+        const req = store.put(data);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function dbGetAll(storeName) {
+      return new Promise((resolve, reject) => {
+        const tx = AppState.db.transaction([storeName], 'readonly');
+        const store = tx.objectStore(storeName);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function dbGet(storeName, key) {
+      return new Promise((resolve, reject) => {
+        const tx = AppState.db.transaction([storeName], 'readonly');
+        const store = tx.objectStore(storeName);
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function dbDelete(storeName, key) {
+      return new Promise((resolve, reject) => {
+        const tx = AppState.db.transaction([storeName], 'readwrite');
+        const store = tx.objectStore(storeName);
+        const req = store.delete(key);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    /* ================= SINTETIZADOR DE AUDIO (WEB AUDIO API) ================= */
+    function playTone(type = 'success') {
+      if (!AppState.audioEnabled) return;
+      try {
+        if (!AppState.audioCtx) {
+          AppState.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (AppState.audioCtx.state === 'suspended') {
+          AppState.audioCtx.resume();
+        }
+
+        const now = AppState.audioCtx.currentTime;
+        const osc = AppState.audioCtx.createOscillator();
+        const gain = AppState.audioCtx.createGain();
+
+        osc.connect(gain);
+        gain.connect(AppState.audioCtx.destination);
+
+        if (type === 'success') {
+          // Secuencia armonica suave para cambio de pomodoro
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(523.25, now); // C5
+          osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.2); // G5
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+          osc.start(now);
+          osc.stop(now + 0.8);
+        } else if (type === 'tick') {
+          // Clic suave
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(800, now);
+          gain.gain.setValueAtTime(0.05, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+          osc.start(now);
+          osc.stop(now + 0.05);
+        }
+      } catch (err) {
+        console.warn("Audio Context no inicializado por interaccion del usuario:", err);
+      }
+    }
+
+    function toggleAudio() {
+      AppState.audioEnabled = !AppState.audioEnabled;
+      document.getElementById('audio-icon-on').classList.toggle('hidden', !AppState.audioEnabled);
+      document.getElementById('audio-icon-off').classList.toggle('hidden', AppState.audioEnabled);
+      showToast(AppState.audioEnabled ? "Notificaciones sonoras activadas" : "Notificaciones sonoras silenciadas");
+    }
+
+    /* ================= NOTIFICACIONES Y MODALES PERSONALIZADOS ================= */
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `p-3 rounded-xl bg-slate-900 border border-slate-700 shadow-xl text-xs font-medium text-slate-200 flex items-center space-x-2.5 pointer-events-auto fade-in max-w-sm`;
+      
+      let indicatorColor = 'bg-indigo-500';
+      if (type === 'success') indicatorColor = 'bg-emerald-500';
+      if (type === 'warning') indicatorColor = 'bg-amber-500';
+      if (type === 'error') indicatorColor = 'bg-rose-500';
+
+      toast.innerHTML = `
+        <span class="w-2 h-2 rounded-full ${indicatorColor} flex-shrink-0"></span>
+        <span class="flex-1">${message}</span>
+      `;
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    function showConfirmModal(title, message, confirmText = 'Aceptar', onConfirm = null) {
+      const modal = document.getElementById('custom-modal');
+      document.getElementById('modal-title').textContent = title;
+      document.getElementById('modal-body').textContent = message;
+      const confirmBtn = document.getElementById('modal-confirm-btn');
+      confirmBtn.textContent = confirmText;
+
+      confirmBtn.onclick = () => {
+        closeModal();
+        if (onConfirm) onConfirm();
+      };
+      modal.classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('custom-modal').classList.add('hidden');
+    }
+
+    /* ================= NAVEGACION DE MODULOS ================= */
+    function switchModule(targetModule) {
+      AppState.currentModule = targetModule;
+
+      // Actualizar botones de la barra
+      const tabs = [
+        { id: 'docs', btn: 'nav-btn-docs', mod: 'module-docs' },
+        { id: 'pomodoro', btn: 'nav-btn-pomodoro', mod: 'module-pomodoro' },
+        { id: 'board', btn: 'nav-btn-board', mod: 'module-board' }
+      ];
+
+      tabs.forEach(tab => {
+        const btnElem = document.getElementById(tab.btn);
+        const modElem = document.getElementById(tab.mod);
+        if (tab.id === targetModule) {
+          btnElem.className = 'module-tab px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 transition-all bg-indigo-600 text-white shadow-sm';
+          modElem.classList.remove('hidden');
+        } else {
+          btnElem.className = 'module-tab px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/60';
+          modElem.classList.add('hidden');
+        }
+      });
+
+      if (targetModule === 'pomodoro') {
+        renderPlannerControls();
+        renderTasks();
+      } else if (targetModule === 'board') {
+        renderWhiteboard();
+      }
+    }
+
+    /* ================= GESTOR DE MATERIAL Y SUBIDA (INDEXEDDB) ================= */
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('border-indigo-500', 'bg-indigo-500/10');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('border-indigo-500', 'bg-indigo-500/10');
+      });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+        processUploadedFiles(files);
+      }
+    });
+
+    function handleFileSelect(e) {
+      const files = e.target.files;
+      if (files && files.length > 0) {
+        processUploadedFiles(files);
+      }
+      fileInput.value = '';
+    }
+
+    async function processUploadedFiles(files) {
+      showToast("Procesando archivos PDF...", "info");
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+          showToast(`El archivo ${file.name} no es un documento PDF valido`, 'warning');
+          continue;
+        }
+
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          // Cargar provisionalmente con PDF.js para calcular paginas exactas
+          const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer.slice(0) });
+          const pdfDoc = await loadingTask.promise;
+          const pageCount = pdfDoc.numPages;
+
+          const docRecord = {
+            id: 'doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+            name: file.name,
+            size: file.size,
+            pageCount: pageCount,
+            uploadDate: new Date().toISOString(),
+            currentPage: 1,
+            data: arrayBuffer
+          };
+
+          await dbPut('documents', docRecord);
+          showToast(`Documento ${file.name} guardado con exito (${pageCount} paginas)`, 'success');
+        } catch (error) {
+          console.error("Error al procesar PDF:", error);
+          showToast(`Error al leer ${file.name}`, 'error');
+        }
+      }
+
+      await loadStoredDocuments();
+      if (AppState.documents.length > 0 && !AppState.activeDocId) {
+        openDocumentInViewer(AppState.documents[AppState.documents.length - 1].id);
+      }
+    }
+
+    async function loadStoredDocuments() {
+      AppState.documents = await dbGetAll('documents');
+      renderDocumentList();
+      updatePlannerDocSelectors();
+      updatePlannerCalculations();
+      populateWhiteboardDocFilter();
+      populateTaskDocSelector();
+    }
+
+    function renderDocumentList() {
+      const container = document.getElementById('document-list-container');
+      const counterBadge = document.getElementById('doc-counter-badge');
+      counterBadge.textContent = `${AppState.documents.length} docs`;
+
+      if (AppState.documents.length === 0) {
+        container.innerHTML = `
+          <div id="no-docs-message" class="text-center py-10 px-4 text-slate-400">
+            <svg class="w-10 h-10 mx-auto text-slate-600 mb-2" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+            </svg>
+            <p class="text-xs font-medium text-slate-400">Sin documentos cargados</p>
+            <p class="text-[11px] text-slate-400 mt-1">Sube tus apuntes para iniciar el visor y calcular los pomodoros.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = '';
+      AppState.documents.forEach(doc => {
+        const isActive = doc.id === AppState.activeDocId;
+        const card = document.createElement('div');
+        card.className = `p-3 rounded-xl border transition-all cursor-pointer ${
+          isActive 
+            ? 'bg-indigo-950/40 border-indigo-500/80 shadow-md shadow-indigo-950/50' 
+            : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+        }`;
+
+        card.innerHTML = `
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-start space-x-2.5 min-w-0" onclick="openDocumentInViewer('${doc.id}')">
+              <div class="w-7 h-7 rounded-lg ${isActive ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'} flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                </svg>
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-xs font-semibold text-white truncate" title="${doc.name}">${doc.name}</h4>
+                <div class="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5">
+                  <span class="font-mono">${doc.pageCount} pags</span>
+                  <span>•</span>
+                  <span>${formatFileSize(doc.size)}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="flex items-center space-x-1 flex-shrink-0">
+              <button onclick="confirmDeleteDocument('${doc.id}', '${doc.name}')" title="Eliminar documento" class="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function confirmDeleteDocument(docId, docName) {
+      showConfirmModal(
+        "Eliminar Documento",
+        `Deseas eliminar permanentemente "${docName}" y todas sus notas asociadas? Esta accion no se puede deshacer.`,
+        "Eliminar",
+        async () => {
+          await dbDelete('documents', docId);
+          // Borrar notas asociadas
+          const allNotes = await dbGetAll('notes');
+          for (const note of allNotes) {
+            if (note.docId === docId) {
+              await dbDelete('notes', note.id);
+            }
+          }
+          if (AppState.activeDocId === docId) {
+            AppState.activeDocId = null;
+            AppState.activePdfDoc = null;
+            document.getElementById('pdf-canvas-wrapper').classList.add('hidden');
+            document.getElementById('empty-viewer-state').classList.remove('hidden');
+            document.getElementById('viewer-doc-title').textContent = "Sin archivo abierto";
+          }
+          await loadStoredDocuments();
+          await loadAllNotes();
+          showToast("Documento eliminado correctamente");
+        }
+      );
+    }
+
+    /* ================= VISOR PDF AVANZADO ================= */
+    async function openDocumentInViewer(docId) {
+      try {
+        const docRecord = await dbGet('documents', docId);
+        if (!docRecord) return;
+
+        AppState.activeDocId = docId;
+        AppState.currentPage = docRecord.currentPage || 1;
+        document.getElementById('viewer-doc-title').textContent = docRecord.name;
+
+        // Cargar con PDF.js
+        const loadingTask = pdfjsLib.getDocument({ data: docRecord.data });
+        AppState.activePdfDoc = await loadingTask.promise;
+        AppState.totalPages = AppState.activePdfDoc.numPages;
+
+        document.getElementById('total-pages-count').textContent = AppState.totalPages;
+        document.getElementById('current-page-num').value = AppState.currentPage;
+        document.getElementById('current-page-num').max = AppState.totalPages;
+
+        document.getElementById('empty-viewer-state').classList.add('hidden');
+        document.getElementById('pdf-canvas-wrapper').classList.remove('hidden');
+
+        renderDocumentList();
+        await renderPdfCurrentPage();
+      } catch (err) {
+        console.error("Error al abrir visor PDF:", err);
+        showToast("Error al renderizar el documento PDF", "error");
+      }
+    }
+
+    let isRendering = false;
+    let pendingPageRender = null;
+
+    async function renderPdfCurrentPage() {
+      if (!AppState.activePdfDoc) return;
+      if (isRendering) {
+        pendingPageRender = AppState.currentPage;
+        return;
+      }
+      isRendering = true;
+
+      try {
+        const page = await AppState.activePdfDoc.getPage(AppState.currentPage);
+        const canvas = document.getElementById('pdf-render-canvas');
+        const context = canvas.getContext('2d');
+        const wrapper = document.getElementById('pdf-canvas-wrapper');
+
+        const viewport = page.getViewport({ scale: AppState.zoom });
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        wrapper.style.width = `${viewport.width}px`;
+        wrapper.style.height = `${viewport.height}px`;
+
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport
+        };
+
+        await page.render(renderContext).promise;
+        isRendering = false;
+
+        if (pendingPageRender !== null) {
+          const nextP = pendingPageRender;
+          pendingPageRender = null;
+          AppState.currentPage = nextP;
+          renderPdfCurrentPage();
+          return;
+        }
+
+        // Actualizar posicion guardada del documento
+        const currentDoc = await dbGet('documents', AppState.activeDocId);
+        if (currentDoc) {
+          currentDoc.currentPage = AppState.currentPage;
+          await dbPut('documents', currentDoc);
+        }
+
+        document.getElementById('current-page-num').value = AppState.currentPage;
+        document.getElementById('btn-prev-page').disabled = AppState.currentPage <= 1;
+        document.getElementById('btn-next-page').disabled = AppState.currentPage >= AppState.totalPages;
+
+        // Renderizar notas de la pagina
+        renderPageStickyNotes();
+      } catch (e) {
+        isRendering = false;
+        console.error("Error al renderizar pagina:", e);
+      }
+    }
+
+    function prevPage() {
+      if (AppState.currentPage > 1) {
+        AppState.currentPage--;
+        renderPdfCurrentPage();
+      }
+    }
+
+    function nextPage() {
+      if (AppState.currentPage < AppState.totalPages) {
+        AppState.currentPage++;
+        renderPdfCurrentPage();
+      }
+    }
+
+    function goToPageInput(val) {
+      let pageNum = parseInt(val, 10);
+      if (isNaN(pageNum)) pageNum = 1;
+      if (pageNum < 1) pageNum = 1;
+      if (pageNum > AppState.totalPages) pageNum = AppState.totalPages;
+      AppState.currentPage = pageNum;
+      renderPdfCurrentPage();
+    }
+
+    function zoomIn() {
+      if (AppState.zoom < 2.5) {
+        AppState.zoom += 0.15;
+        updateZoomLabel();
+        renderPdfCurrentPage();
+      }
+    }
+
+    function zoomOut() {
+      if (AppState.zoom > 0.5) {
+        AppState.zoom -= 0.15;
+        updateZoomLabel();
+        renderPdfCurrentPage();
+      }
+    }
+
+    function fitToWidth() {
+      const scrollContainer = document.getElementById('pdf-scroll-container');
+      const availableWidth = scrollContainer.clientWidth - 48;
+      if (AppState.activePdfDoc && availableWidth > 200) {
+        AppState.activePdfDoc.getPage(AppState.currentPage).then(page => {
+          const defaultViewport = page.getViewport({ scale: 1.0 });
+          AppState.zoom = availableWidth / defaultViewport.width;
+          updateZoomLabel();
+          renderPdfCurrentPage();
+        });
+      }
+    }
+
+    function updateZoomLabel() {
+      document.getElementById('zoom-level-text').textContent = `${Math.round(AppState.zoom * 100)}%`;
+    }
+
+    /* ================= POST-IT / NOTAS ADHESIVAS SOBRE PDF ================= */
+    function toggleStickyMode() {
+      if (!AppState.activeDocId) {
+        showToast("Primero abre un documento para pegar notas", "warning");
+        return;
+      }
+      AppState.stickyMode = !AppState.stickyMode;
+      const btn = document.getElementById('toggle-sticky-mode-btn');
+      const btnText = document.getElementById('sticky-btn-text');
+      const overlay = document.getElementById('notes-overlay-layer');
+
+      if (AppState.stickyMode) {
+        btn.className = 'px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-sm flex items-center gap-1.5';
+        btnText.textContent = "Fijar Activo";
+        overlay.classList.add('cursor-crosshair-mode');
+        showToast("Haz clic en cualquier punto del documento para adherir una nota", "info");
+      } else {
+        btn.className = 'px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-700 bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1.5';
+        btnText.textContent = "Pegar Nota";
+        overlay.classList.remove('cursor-crosshair-mode');
+      }
+    }
+
+    function setSelectedColor(color) {
+      AppState.selectedColor = color;
+      ['yellow', 'cyan', 'green', 'lavender'].forEach(c => {
+        const btn = document.getElementById(`color-pick-${c}`);
+        if (c === color) {
+          btn.className = 'w-4 h-4 rounded-full border-2 border-white scale-110 transition-transform';
+        } else {
+          btn.className = 'w-4 h-4 rounded-full border border-transparent opacity-70 hover:opacity-100 transition-opacity';
+        }
+      });
+    }
+
+    async function handleOverlayClick(e) {
+      if (!AppState.stickyMode) return;
+      // Evitar fijar si se hace click sobre una nota existente
+      if (e.target.closest('.sticky-note-element')) return;
+
+      const overlay = document.getElementById('notes-overlay-layer');
+      const rect = overlay.getBoundingClientRect();
+      const xRatio = (e.clientX - rect.left) / rect.width;
+      const yRatio = (e.clientY - rect.top) / rect.height;
+
+      const newNote = {
+        id: 'note_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        docId: AppState.activeDocId,
+        page: AppState.currentPage,
+        xRatio: Math.max(0.02, Math.min(0.85, xRatio)),
+        yRatio: Math.max(0.02, Math.min(0.85, yRatio)),
+        content: '',
+        color: AppState.selectedColor,
+        zone: 'ideas', // Zona de clasificacion por defecto para la pizarra
+        createdAt: new Date().toISOString()
+      };
+
+      await dbPut('notes', newNote);
+      await loadAllNotes();
+      renderPageStickyNotes();
+      toggleStickyMode(); // Desactivar modo despues de fijar
+      showToast("Nota adhesiva fijada. Puedes escribir en ella.", "success");
+    }
+
+    async function loadAllNotes() {
+      AppState.notes = await dbGetAll('notes');
+      renderPageStickyNotes();
+      renderWhiteboard();
+    }
+
+    function renderPageStickyNotes() {
+      const overlay = document.getElementById('notes-overlay-layer');
+      overlay.innerHTML = '';
+
+      if (!AppState.activeDocId) {
+        document.getElementById('viewer-notes-count').textContent = '0 notas';
+        return;
+      }
+
+      const pageNotes = AppState.notes.filter(
+        n => n.docId === AppState.activeDocId && n.page === AppState.currentPage
+      );
+
+      document.getElementById('viewer-notes-count').textContent = `${pageNotes.length} notas en esta pagina`;
+
+      pageNotes.forEach(note => {
+        const noteEl = document.createElement('div');
+        noteEl.className = `sticky-note-element absolute p-2 rounded-xl border shadow-xl flex flex-col note-${note.color} transition-shadow`;
+        noteEl.style.left = `${note.xRatio * 100}%`;
+        noteEl.style.top = `${note.yRatio * 100}%`;
+        noteEl.style.width = '200px';
+        noteEl.style.zIndex = '30';
+
+        noteEl.innerHTML = `
+          <div class="flex items-center justify-between pb-1 mb-1 border-b border-black/10 text-[10px] font-semibold select-none cursor-move">
+            <span class="flex items-center gap-1">
+              <svg class="w-3 h-3 opacity-60" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
+              </svg>
+              Pagina ${note.page}
+            </span>
+            <div class="flex items-center space-x-1">
+              <button onclick="deleteStickyNote('${note.id}')" title="Eliminar nota" class="opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-black/10">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <textarea class="w-full bg-transparent resize-none border-0 p-0 text-xs focus:outline-none placeholder-black/40 leading-snug" rows="3" placeholder="Escribe un apunte..." onchange="updateStickyNoteText('${note.id}', this.value)">${escapeHtml(note.content)}</textarea>
+        `;
+        overlay.appendChild(noteEl);
+      });
+    }
+
+    async function updateStickyNoteText(noteId, text) {
+      const note = AppState.notes.find(n => n.id === noteId);
+      if (note) {
+        note.content = text;
+        await dbPut('notes', note);
+        renderWhiteboard();
+      }
+    }
+
+    async function deleteStickyNote(noteId) {
+      await dbDelete('notes', noteId);
+      AppState.notes = AppState.notes.filter(n => n.id !== noteId);
+      renderPageStickyNotes();
+      renderWhiteboard();
+      showToast("Nota eliminada");
+    }
+
+    /* ================= PLANIFICADOR INTELIGENTE POMODORO ================= */
+    function renderPlannerControls() {
+      // Configurar fecha minima por defecto a hoy si esta vacia
+      const deadlineInput = document.getElementById('planner-deadline-input');
+      if (!deadlineInput.value) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 2);
+        tomorrow.setHours(20, 0, 0, 0);
+        const isoStr = tomorrow.toISOString().slice(0, 16);
+        deadlineInput.value = isoStr;
+        AppState.planner.deadline = isoStr;
+      }
+      updatePlannerDocSelectors();
+      updatePlannerCalculations();
+    }
+
+    function updatePlannerDocSelectors() {
+      const container = document.getElementById('planner-docs-checkbox-list');
+      if (AppState.documents.length === 0) {
+        container.innerHTML = `<p class="text-[11px] text-slate-400 italic">No hay documentos registrados aun.</p>`;
+        return;
+      }
+
+      container.innerHTML = '';
+      AppState.documents.forEach(doc => {
+        const isChecked = AppState.planner.selectedDocIds.length === 0 || AppState.planner.selectedDocIds.includes(doc.id);
+        if (AppState.planner.selectedDocIds.length === 0) {
+          AppState.planner.selectedDocIds.push(doc.id);
+        }
+
+        const item = document.createElement('label');
+        item.className = 'flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none py-1 hover:text-white';
+        item.innerHTML = `
+          <input type="checkbox" value="${doc.id}" ${isChecked ? 'checked' : ''} onchange="togglePlannerDoc('${doc.id}', this.checked)" class="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-0">
+          <span class="truncate flex-1">${escapeHtml(doc.name)}</span>
+          <span class="font-mono text-[10px] text-slate-400">(${doc.pageCount} pags)</span>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function togglePlannerDoc(docId, isChecked) {
+      if (isChecked) {
+        if (!AppState.planner.selectedDocIds.includes(docId)) {
+          AppState.planner.selectedDocIds.push(docId);
+        }
+      } else {
+        AppState.planner.selectedDocIds = AppState.planner.selectedDocIds.filter(id => id !== docId);
+      }
+      updatePlannerCalculations();
+    }
+
+    function toggleSelectAllDocsForPlan() {
+      if (AppState.planner.selectedDocIds.length === AppState.documents.length) {
+        AppState.planner.selectedDocIds = [];
+      } else {
+        AppState.planner.selectedDocIds = AppState.documents.map(d => d.id);
+      }
+      updatePlannerDocSelectors();
+      updatePlannerCalculations();
+    }
+
+    function updatePlannerCalculations() {
+      const deadlineInput = document.getElementById('planner-deadline-input');
+      const speedInput = document.getElementById('planner-speed-input');
+
+      AppState.planner.deadline = deadlineInput.value;
+      const speed = parseInt(speedInput.value, 10) || 3;
+      AppState.planner.speedMinPerPage = speed;
+
+      const selectedDocs = AppState.documents.filter(d => AppState.planner.selectedDocIds.includes(d.id));
+      const totalPages = selectedDocs.reduce((acc, d) => acc + (d.pageCount || 0), 0);
+      const totalReadingMinutes = totalPages * speed;
+
+      document.getElementById('calc-total-pages').textContent = totalPages;
+      const hours = Math.floor(totalReadingMinutes / 60);
+      const minutes = totalReadingMinutes % 60;
+      document.getElementById('calc-study-time').textContent = `${hours}h ${minutes}m`;
+
+      let hoursUntilDeadline = 0;
+      let diffDays = 0;
+      const now = new Date();
+
+      if (AppState.planner.deadline) {
+        const deadlineDate = new Date(AppState.planner.deadline);
+        const diffMs = deadlineDate.getTime() - now.getTime();
+        hoursUntilDeadline = (diffMs / (1000 * 60 * 60));
+        diffDays = hoursUntilDeadline / 24;
+      }
+
+      const hoursLeftBadge = document.getElementById('calc-hours-left');
+      if (hoursUntilDeadline <= 0) {
+        hoursLeftBadge.textContent = 'Vencido';
+        hoursLeftBadge.className = 'text-lg font-bold text-rose-500 font-mono mt-0.5';
+      } else {
+        hoursLeftBadge.textContent = `${hoursUntilDeadline.toFixed(1)}h`;
+        hoursLeftBadge.className = 'text-lg font-bold text-amber-400 font-mono mt-0.5';
+      }
+
+      // Pomodoros estandar (25 min de estudio)
+      const workSessionMin = 25;
+      const pomodorosNeeded = Math.ceil(totalReadingMinutes / workSessionMin);
+      AppState.planner.calculatedPomodoros = pomodorosNeeded;
+
+      document.getElementById('calc-pomodoros-needed').textContent = pomodorosNeeded;
+
+      // Evaluar Viabilidad y Recomendacion
+      const feasibilityBadge = document.getElementById('feasibility-badge');
+      const recText = document.getElementById('planner-recommendation-text');
+
+      if (totalPages === 0) {
+        feasibilityBadge.textContent = "Sin material";
+        feasibilityBadge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400";
+        recText.textContent = "Selecciona documentos con paginas para obtener un plan personalizado.";
+        return;
+      }
+
+      if (hoursUntilDeadline <= 0) {
+        feasibilityBadge.textContent = "Fecha vencida";
+        feasibilityBadge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-rose-900/60 text-rose-300 border border-rose-700/50";
+        recText.textContent = "La fecha limite seleccionada ya ha transcurrido. Ajusta el deadline para un calculo realista.";
+        return;
+      }
+
+      const totalRequiredHours = (totalReadingMinutes + (pomodorosNeeded * 5)) / 60; // tiempo de estudio + descansos cortos
+
+      if (totalRequiredHours > hoursUntilDeadline) {
+        feasibilityBadge.textContent = "Sobrecarga Critica";
+        feasibilityBadge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-rose-900/60 text-rose-300 border border-rose-700/50";
+        recText.textContent = `Atencion: Se requieren aprox. ${totalRequiredHours.toFixed(1)}h de dedicacion total y solo restan ${hoursUntilDeadline.toFixed(1)}h reales hasta la fecha limite. Reduce material o extiende la fecha limite.`;
+      } else if (totalRequiredHours > (hoursUntilDeadline * 0.65)) {
+        feasibilityBadge.textContent = "Horario Ajustado";
+        feasibilityBadge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-amber-900/60 text-amber-300 border border-amber-700/50";
+        const dailyRate = diffDays > 0 ? (pomodorosNeeded / diffDays).toFixed(1) : pomodorosNeeded;
+        recText.textContent = `Ritmo intenso: Debes completar aprox. ${dailyRate} bloques pomodoro diarios (${(dailyRate * 25 / 60).toFixed(1)}h/dia) para alcanzar la meta a tiempo.`;
+      } else {
+        feasibilityBadge.textContent = "Ritmo Optimo";
+        feasibilityBadge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-900/60 text-emerald-300 border border-emerald-700/50";
+        const dailyRate = diffDays > 0 ? (pomodorosNeeded / diffDays).toFixed(1) : pomodorosNeeded;
+        recText.textContent = `Plan balanceado: Con ${dailyRate} pomodoros por dia (${Math.round(dailyRate * 25)} min diarios) cumpliras tu meta de lectura con holgura.`;
+      }
+
+      updatePomodoroGoalProgress();
+    }
+
+    function applyCalculatedPlanToTimer() {
+      const needed = AppState.planner.calculatedPomodoros;
+      if (needed <= 0) {
+        showToast("No hay pomodoros calculados para aplicar", "warning");
+        return;
+      }
+      AppState.timer.totalPlannedPomodoros = needed;
+      updatePomodoroGoalProgress();
+      showToast(`Meta fijada en ${needed} sesiones pomodoro`, "success");
+    }
+
+    /* ================= TEMPORIZADOR POMODORO FUNCIONAL ================= */
+    function setTimerMode(mode) {
+      if (AppState.timer.isRunning) {
+        clearInterval(AppState.timer.intervalId);
+        AppState.timer.isRunning = false;
+        updateTimerControls();
+      }
+
+      AppState.timer.mode = mode;
+
+      const btnStudy = document.getElementById('timer-mode-study');
+      const btnShort = document.getElementById('timer-mode-short');
+      const btnLong = document.getElementById('timer-mode-long');
+      const modeLabel = document.getElementById('timer-mode-label');
+
+      [btnStudy, btnShort, btnLong].forEach(b => {
+        b.className = 'px-4 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all';
+      });
+
+      if (mode === 'study') {
+        btnStudy.className = 'px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-sm transition-all';
+        modeLabel.textContent = "Sesion de Estudio";
+        AppState.timer.remainingSeconds = AppState.timer.studyDuration;
+      } else if (mode === 'short') {
+        btnShort.className = 'px-4 py-1.5 rounded-lg text-xs font-semibold bg-sky-600 text-white shadow-sm transition-all';
+        modeLabel.textContent = "Descanso Corto";
+        AppState.timer.remainingSeconds = AppState.timer.shortDuration;
+      } else if (mode === 'long') {
+        btnLong.className = 'px-4 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 text-white shadow-sm transition-all';
+        modeLabel.textContent = "Descanso Largo";
+        AppState.timer.remainingSeconds = AppState.timer.longDuration;
+      }
+
+      updateTimerDisplay();
+    }
+
+    function toggleTimer() {
+      if (AppState.timer.isRunning) {
+        // Pausar
+        clearInterval(AppState.timer.intervalId);
+        AppState.timer.isRunning = false;
+        updateTimerControls();
+        showToast("Temporizador pausado");
+      } else {
+        // Iniciar
+        AppState.timer.isRunning = true;
+        updateTimerControls();
+        playTone('tick');
+
+        AppState.timer.intervalId = setInterval(() => {
+          if (AppState.timer.remainingSeconds > 0) {
+            AppState.timer.remainingSeconds--;
+            updateTimerDisplay();
+          } else {
+            handleTimerCycleComplete();
+          }
+        }, 1000);
+      }
+    }
+
+    function handleTimerCycleComplete() {
+      clearInterval(AppState.timer.intervalId);
+      AppState.timer.isRunning = false;
+      playTone('success');
+
+      if (AppState.timer.mode === 'study') {
+        AppState.timer.cyclesCompleted++;
+        updatePomodoroGoalProgress();
+        showToast("Ciclo de estudio completado con exito! Es hora de un descanso.", "success");
+        // Alternar a descanso corto o descanso largo cada 4 ciclos
+        if (AppState.timer.cyclesCompleted % 4 === 0) {
+          setTimerMode('long');
+        } else {
+          setTimerMode('short');
+        }
+      } else {
+        showToast("Descanso finalizado. Preparate para continuar tu estudio.", "info");
+        setTimerMode('study');
+      }
+
+      updateTimerControls();
+    }
+
+    function resetTimer() {
+      if (AppState.timer.isRunning) {
+        clearInterval(AppState.timer.intervalId);
+        AppState.timer.isRunning = false;
+      }
+      setTimerMode(AppState.timer.mode);
+      updateTimerControls();
+      showToast("Temporizador reiniciado");
+    }
+
+    function skipTimerCycle() {
+      if (AppState.timer.isRunning) {
+        clearInterval(AppState.timer.intervalId);
+        AppState.timer.isRunning = false;
+      }
+      if (AppState.timer.mode === 'study') {
+        setTimerMode('short');
+      } else {
+        setTimerMode('study');
+      }
+      updateTimerControls();
+    }
+
+    function updateTimerControls() {
+      const playIcon = document.getElementById('timer-play-icon');
+      const pauseIcon = document.getElementById('timer-pause-icon');
+      const btnText = document.getElementById('timer-btn-text');
+
+      if (AppState.timer.isRunning) {
+        playIcon.classList.add('hidden');
+        pauseIcon.classList.remove('hidden');
+        btnText.textContent = "Pausar";
+      } else {
+        playIcon.classList.remove('hidden');
+        pauseIcon.classList.add('hidden');
+        btnText.textContent = "Iniciar Sesion";
+      }
+    }
+
+    function updateTimerDisplay() {
+      const minutes = Math.floor(AppState.timer.remainingSeconds / 60);
+      const seconds = AppState.timer.remainingSeconds % 60;
+      const formatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+      document.getElementById('timer-display').textContent = formatted;
+      document.getElementById('quick-timer-label').textContent = formatted;
+
+      // Calcular radio del SVG (perimetro 2 * PI * 44 = 276.46)
+      const circumference = 276.46;
+      let totalDuration = AppState.timer.studyDuration;
+      if (AppState.timer.mode === 'short') totalDuration = AppState.timer.shortDuration;
+      if (AppState.timer.mode === 'long') totalDuration = AppState.timer.longDuration;
+
+      const progress = AppState.timer.remainingSeconds / totalDuration;
+      const dashoffset = circumference * (1 - progress);
+      document.getElementById('timer-progress-ring').style.strokeDashoffset = dashoffset;
+    }
+
+    function updatePomodoroGoalProgress() {
+      const target = AppState.timer.totalPlannedPomodoros || AppState.planner.calculatedPomodoros || 1;
+      const current = AppState.timer.cyclesCompleted;
+
+      document.getElementById('timer-cycle-count').textContent = `Pomodoro #${current + 1}`;
+      document.getElementById('pomodoro-progress-ratio').textContent = `${current} / ${target} Pomodoros`;
+
+      const percentage = Math.min(100, Math.round((current / target) * 100));
+      document.getElementById('pomodoro-goal-bar').style.width = `${percentage}%`;
+    }
+
+    /* ================= LISTA DE TAREAS (TO-DO) ================= */
+    async function loadTasks() {
+      AppState.tasks = await dbGetAll('tasks');
+      renderTasks();
+    }
+
+    function populateTaskDocSelector() {
+      const select = document.getElementById('task-input-doc');
+      select.innerHTML = '<option value="">(Sin vincular a archivo)</option>';
+      AppState.documents.forEach(doc => {
+        const opt = document.createElement('option');
+        opt.value = doc.id;
+        opt.textContent = doc.name;
+        select.appendChild(opt);
+      });
+    }
+
+    async function addTask(e) {
+      e.preventDefault();
+      const input = document.getElementById('task-input-title');
+      const docSelect = document.getElementById('task-input-doc');
+      const title = input.value.trim();
+      if (!title) return;
+
+      const task = {
+        id: 'task_' + Date.now(),
+        title: title,
+        docId: docSelect.value || null,
+        completed: false,
+        createdAt: new Date().toISOString()
+      };
+
+      await dbPut('tasks', task);
+      AppState.tasks.push(task);
+      input.value = '';
+      renderTasks();
+      showToast("Tarea anadida a tu lista", "success");
+    }
+
+    async function toggleTask(taskId) {
+      const task = AppState.tasks.find(t => t.id === taskId);
+      if (task) {
+        task.completed = !task.completed;
+        await dbPut('tasks', task);
+        renderTasks();
+        if (task.completed) playTone('tick');
+      }
+    }
+
+    async function deleteTask(taskId) {
+      await dbDelete('tasks', taskId);
+      AppState.tasks = AppState.tasks.filter(t => t.id !== taskId);
+      renderTasks();
+      showToast("Tarea eliminada");
+    }
+
+    function filterTasks(status) {
+      AppState.taskFilter = status;
+      ['all', 'pending', 'completed'].forEach(s => {
+        const btn = document.getElementById(`filter-task-${s}`);
+        if (s === status) {
+          btn.className = 'px-2 py-0.5 rounded font-medium bg-slate-800 text-white';
+        } else {
+          btn.className = 'px-2 py-0.5 rounded font-medium text-slate-400 hover:text-white';
+        }
+      });
+      renderTasks();
+    }
+
+    function renderTasks() {
+      const container = document.getElementById('tasks-list-container');
+      let filtered = AppState.tasks;
+
+      if (AppState.taskFilter === 'pending') {
+        filtered = filtered.filter(t => !t.completed);
+      } else if (AppState.taskFilter === 'completed') {
+        filtered = filtered.filter(t => t.completed);
+      }
+
+      if (filtered.length === 0) {
+        container.innerHTML = `<p class="text-xs text-slate-400 text-center py-4">No hay tareas en esta vista.</p>`;
+        return;
+      }
+
+      container.innerHTML = '';
+      filtered.forEach(t => {
+        const docLinked = AppState.documents.find(d => d.id === t.docId);
+        const item = document.createElement('div');
+        item.className = `p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors ${
+          t.completed ? 'bg-slate-950/40 border-slate-800 opacity-60' : 'bg-slate-900 border-slate-800'
+        }`;
+
+        item.innerHTML = `
+          <div class="flex items-center space-x-3 min-w-0">
+            <input type="checkbox" ${t.completed ? 'checked' : ''} onchange="toggleTask('${t.id}')" class="rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-0 cursor-pointer">
+            <div class="min-w-0">
+              <span class="block truncate ${t.completed ? 'line-through text-slate-400' : 'text-slate-200'}">${escapeHtml(t.title)}</span>
+              ${docLinked ? `<span class="text-[10px] text-indigo-400 font-mono">Archivo: ${escapeHtml(docLinked.name)}</span>` : ''}
+            </div>
+          </div>
+          <button onclick="deleteTask('${t.id}')" class="p-1 rounded text-slate-400 hover:text-rose-400">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+          </button>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    /* ================= PIZARRA INTERACTIVA Y DRAG & DROP ================= */
+    function populateWhiteboardDocFilter() {
+      const select = document.getElementById('board-filter-doc');
+      select.innerHTML = '<option value="all">Todos los documentos</option>';
+      AppState.documents.forEach(doc => {
+        const opt = document.createElement('option');
+        opt.value = doc.id;
+        opt.textContent = doc.name;
+        select.appendChild(opt);
+      });
+    }
+
+    function renderWhiteboard() {
+      const filterDocId = document.getElementById('board-filter-doc').value;
+      const zones = ['ideas', 'preguntas', 'resumen', 'tareas'];
+
+      // Contadores
+      const counts = { ideas: 0, preguntas: 0, resumen: 0, tareas: 0 };
+
+      // Limpiar zonas
+      zones.forEach(z => {
+        document.getElementById(`board-zone-${z}`).innerHTML = '';
+      });
+
+      const visibleNotes = AppState.notes.filter(n => {
+        if (filterDocId === 'all') return true;
+        return n.docId === filterDocId;
+      });
+
+      visibleNotes.forEach(note => {
+        const zone = note.zone || 'ideas';
+        counts[zone] = (counts[zone] || 0) + 1;
+        const targetContainer = document.getElementById(`board-zone-${zone}`);
+
+        const docAssociated = AppState.documents.find(d => d.id === note.docId);
+
+        const card = document.createElement('div');
+        card.className = `p-3 rounded-xl border shadow-md flex flex-col note-${note.color || 'yellow'} transition-transform active:scale-95 cursor-grab`;
+        card.setAttribute('draggable', 'true');
+        card.setAttribute('data-note-id', note.id);
+        card.ondragstart = (e) => handleDragStart(e, note.id);
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-black/10 text-[10px] font-semibold select-none">
+            <span class="truncate max-w-[140px] opacity-80" title="${docAssociated ? docAssociated.name : 'Nota General'}">
+              ${docAssociated ? escapeHtml(docAssociated.name) : 'Nota General'}
+            </span>
+            <div class="flex items-center space-x-1">
+              ${note.page ? `<span class="bg-black/10 px-1 rounded font-mono">P.${note.page}</span>` : ''}
+              <button onclick="deleteWhiteboardNote('${note.id}')" title="Eliminar nota" class="p-0.5 rounded hover:bg-black/15">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <p class="text-xs leading-relaxed whitespace-pre-wrap">${escapeHtml(note.content || '(Sin texto)')}</p>
+        `;
+
+        if (targetContainer) targetContainer.appendChild(card);
+      });
+
+      // Actualizar badges
+      zones.forEach(z => {
+        document.getElementById(`zone-count-${z}`).textContent = counts[z] || 0;
+      });
+    }
+
+    let draggedNoteId = null;
+
+    function handleDragStart(e, noteId) {
+      draggedNoteId = noteId;
+      e.dataTransfer.setData('text/plain', noteId);
+      e.dataTransfer.effectAllowed = 'move';
+    }
+
+    function handleDragOver(e) {
+      e.preventDefault();
+      e.currentTarget.classList.add('border-indigo-500', 'bg-slate-800/80');
+    }
+
+    function handleDragLeave(e) {
+      e.currentTarget.classList.remove('border-indigo-500', 'bg-slate-800/80');
+    }
+
+    async function handleDrop(e, newZone) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('border-indigo-500', 'bg-slate-800/80');
+      const noteId = e.dataTransfer.getData('text/plain') || draggedNoteId;
+      if (!noteId) return;
+
+      const note = AppState.notes.find(n => n.id === noteId);
+      if (note && note.zone !== newZone) {
+        note.zone = newZone;
+        await dbPut('notes', note);
+        renderWhiteboard();
+        showToast(`Nota movida a la seccion: ${getZoneTitle(newZone)}`);
+      }
+    }
+
+    function getZoneTitle(z) {
+      switch (z) {
+        case 'ideas': return 'Ideas Clave';
+        case 'preguntas': return 'Preguntas y Repaso';
+        case 'resumen': return 'Resumen y Sintesis';
+        case 'tareas': return 'Tareas y Acciones';
+        default: return z;
+      }
+    }
+
+    async function deleteWhiteboardNote(noteId) {
+      await dbDelete('notes', noteId);
+      AppState.notes = AppState.notes.filter(n => n.id !== noteId);
+      renderWhiteboard();
+      renderPageStickyNotes();
+      showToast("Nota eliminada de la pizarra");
+    }
+
+    /* Modal Nota Directa en Pizarra */
+    function openCreateDirectNoteModal() {
+      const selectDoc = document.getElementById('direct-note-doc');
+      selectDoc.innerHTML = '<option value="">(Nota General - Sin Documento)</option>';
+      AppState.documents.forEach(doc => {
+        const opt = document.createElement('option');
+        opt.value = doc.id;
+        opt.textContent = doc.name;
+        selectDoc.appendChild(opt);
+      });
+
+      document.getElementById('direct-note-text').value = '';
+      document.getElementById('direct-note-modal').classList.remove('hidden');
+    }
+
+    function closeDirectNoteModal() {
+      document.getElementById('direct-note-modal').classList.add('hidden');
+    }
+
+    async function submitDirectNote() {
+      const text = document.getElementById('direct-note-text').value.trim();
+      if (!text) {
+        showToast("Ingresa texto para la nota", "warning");
+        return;
+      }
+
+      const zone = document.getElementById('direct-note-zone').value;
+      const docId = document.getElementById('direct-note-doc').value || null;
+      const colorRadio = document.querySelector('input[name="direct-color"]:checked');
+      const color = colorRadio ? colorRadio.value : 'yellow';
+
+      const newNote = {
+        id: 'note_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        docId: docId,
+        page: null,
+        xRatio: null,
+        yRatio: null,
+        content: text,
+        color: color,
+        zone: zone,
+        createdAt: new Date().toISOString()
+      };
+
+      await dbPut('notes', newNote);
+      AppState.notes.push(newNote);
+      closeDirectNoteModal();
+      renderWhiteboard();
+      showToast("Nota anadida a la pizarra", "success");
+    }
+
+    /* ================= EXPORTADOR DE APUNTES A PDF (jsPDF) ================= */
+    async function exportNotesToPdf() {
+      if (AppState.notes.length === 0) {
+        showToast("No existen notas registradas para exportar", "warning");
+        return;
+      }
+
+      showToast("Generando documento PDF de apuntes...", "info");
+
+      try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({
+          orientation: 'portrait',
+          unit: 'mm',
+          format: 'a4'
+        });
+
+        const filterDocId = document.getElementById('board-filter-doc').value;
+        let notesToExport = AppState.notes;
+        if (filterDocId !== 'all') {
+          notesToExport = notesToExport.filter(n => n.docId === filterDocId);
+        }
+
+        // Agrupar notas por documento
+        const grouped = {};
+        notesToExport.forEach(note => {
+          const key = note.docId || 'general';
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key].push(note);
+        });
+
+        // Portada y Encabezado
+        doc.setFillColor(30, 41, 59); // Slate 800
+        doc.rect(0, 0, 210, 40, 'F');
+
+        doc.setTextColor(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(18);
+        doc.text('StudyFlow - Reporte de Apuntes de Estudio', 15, 20);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(203, 213, 225);
+        const exportDate = new Date().toLocaleDateString('es-ES', {
+          year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+        });
+        doc.text(`Fecha de generacion: ${exportDate} | Total de notas: ${notesToExport.length}`, 15, 28);
+
+        let currentY = 50;
+
+        for (const docKey in grouped) {
+          const docNotes = grouped[docKey];
+          let docTitle = 'Notas Generales y Reflexiones';
+          if (docKey !== 'general') {
+            const found = AppState.documents.find(d => d.id === docKey);
+            if (found) docTitle = `Documento: ${found.name}`;
+          }
+
+          // Separador de Seccion de Documento
+          if (currentY > 250) {
+            doc.addPage();
+            currentY = 25;
+          }
+
+          doc.setFillColor(79, 70, 229); // Indigo 600
+          doc.rect(15, currentY, 3, 7, 'F');
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(13);
+          doc.setTextColor(15, 23, 42);
+          doc.text(docTitle, 22, currentY + 5.5);
+          currentY += 12;
+
+          for (const note of docNotes) {
+            const lines = doc.splitTextToSize(note.content || '(Sin texto)', 170);
+            const boxHeight = 16 + (lines.length * 5);
+
+            if (currentY + boxHeight > 275) {
+              doc.addPage();
+              currentY = 25;
+            }
+
+            // Fondo de la tarjeta de nota
+            doc.setFillColor(248, 250, 252);
+            doc.setDrawColor(226, 232, 240);
+            doc.roundedRect(15, currentY, 180, boxHeight, 2, 2, 'FD');
+
+            // Header de la tarjeta
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(71, 85, 105);
+            const zoneText = `Zona: ${getZoneTitle(note.zone || 'ideas')}`;
+            const pageText = note.page ? ` | Pagina: ${note.page}` : '';
+            doc.text(`${zoneText}${pageText}`, 20, currentY + 6);
+
+            // Texto de la nota
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9.5);
+            doc.setTextColor(30, 41, 59);
+            doc.text(lines, 20, currentY + 13);
+
+            currentY += boxHeight + 4;
+          }
+
+          currentY += 6;
+        }
+
+        // Descarga
+        doc.save(`StudyFlow_Apuntes_${new Date().toISOString().slice(0, 10)}.pdf`);
+        showToast("Documento PDF exportado con exito", "success");
+      } catch (err) {
+        console.error("Error al exportar PDF:", err);
+        showToast("Error al exportar los apuntes a PDF", "error");
+      }
+    }
+
+    /* ================= UTILITARIOS ================= */
+    function formatFileSize(bytes) {
+      if (!bytes) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function escapeHtml(string) {
+      if (!string) return '';
+      return String(string)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    /* ================= INICIALIZACION ================= */
+    window.addEventListener('DOMContentLoaded', async () => {
+      try {
+        await initDatabase();
+        await loadStoredDocuments();
+        await loadAllNotes();
+        await loadTasks();
+        renderPlannerControls();
+        updateTimerDisplay();
+        document.getElementById('storage-status-text').textContent = 'Conectado';
+      } catch (e) {
+        console.error("Fallo durante la inicializacion:", e);
+        showToast("No se pudo iniciar el almacenamiento local IndexedDB", "error");
+      }
+    });
+  </script>
+</body>
+</html>
