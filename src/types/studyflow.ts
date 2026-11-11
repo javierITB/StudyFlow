@@ -49,6 +49,8 @@ export interface TaskRecord {
 
 export type CycleIntervalMode = 'time' | 'pages';
 
+export type BlockAllocationMode = 'pack' | 'exact_doc' | 'full_block';
+
 export type StudyPresetId =
   | 'classic'
   | 'deep'
@@ -57,9 +59,43 @@ export type StudyPresetId =
   | 'pages'
   | 'custom';
 
+export type ThemePresetId =
+  | 'midnight'
+  | 'obsidian'
+  | 'nordic'
+  | 'forest'
+  | 'espresso'
+  | 'paper_light';
+
+export type AccentColorId =
+  | 'indigo'
+  | 'violet'
+  | 'emerald'
+  | 'sky'
+  | 'amber'
+  | 'rose';
+
+export type PaperToneId = 'pure' | 'warm' | 'soft_gray';
+
+export type FontChoiceId = 'inter' | 'serif' | 'mono';
+
+export type UiRadiusId = 'modern' | 'sharp' | 'soft';
+
+export type UiScaleId = 'compact' | 'normal' | 'comfortable';
+
+export interface AppearanceSettings {
+  themeId: ThemePresetId;
+  accentId: AccentColorId;
+  paperTone: PaperToneId;
+  fontFamily: FontChoiceId;
+  uiRadius: UiRadiusId;
+  uiScale: UiScaleId;
+}
+
 export interface StudySettings {
   presetId: StudyPresetId;
   intervalMode: CycleIntervalMode;
+  blockAllocationMode: BlockAllocationMode;
   studyMinutes: number;
   pagesPerBlock: number;
   shortBreakMinutes: number;
@@ -69,6 +105,7 @@ export interface StudySettings {
   speedMinPerPage: number;
   resumeFromCurrentPage: boolean;
   audioEnabled: boolean;
+  appearance?: AppearanceSettings;
 }
 
 export interface StudyMethodPreset {
@@ -80,6 +117,16 @@ export interface StudyMethodPreset {
 }
 
 export type RouteStepType = 'study' | 'short_break' | 'long_break';
+
+export interface RouteSegment {
+  docId: string;
+  docName: string;
+  folderName?: string;
+  startPage: number;
+  endPage: number;
+  pageCount: number;
+  estimatedMinutes: number;
+}
 
 export interface RouteStep {
   id: string;
@@ -94,6 +141,7 @@ export interface RouteStep {
   startPage?: number;
   endPage?: number;
   pageCount?: number;
+  segments?: RouteSegment[];
   durationMinutes: number;
   completed: boolean;
 }
@@ -120,11 +168,61 @@ export interface StudyPlanResult {
   recommendation: string;
 }
 
+export type DiagnosticCriterion = 'balanced' | 'average' | 'max';
+
+export type DifficultyLevel = 'agile' | 'standard' | 'dense' | 'extreme';
+
+export interface PageReadingSample {
+  docId: string;
+  docName: string;
+  fileType: DocumentType;
+  page: number;
+  activeSeconds: number;
+  updatedAt: string;
+}
+
+export interface DiagnosticData {
+  isActive: boolean;
+  criterion: DiagnosticCriterion;
+  samples: PageReadingSample[];
+  lastAppliedAt?: string;
+}
+
+export interface DiagnosticStats {
+  sampleCount: number;
+  totalSeconds: number;
+  minSeconds: number;
+  maxSeconds: number;
+  meanSeconds: number;
+  medianSeconds: number;
+  p75Seconds: number;
+}
+
+export interface DiagnosticRecommendation {
+  stats: DiagnosticStats;
+  criterion: DiagnosticCriterion;
+  confidence: 'insufficient' | 'preliminary' | 'calibrated' | 'high';
+  difficulty: DifficultyLevel;
+  difficultyLabel: string;
+  rationale: string;
+  effectiveSecondsPerPage: number;
+  recommendedSettings: Pick<
+    StudySettings,
+    | 'studyMinutes'
+    | 'shortBreakMinutes'
+    | 'longBreakMinutes'
+    | 'longBreakEveryNBlocks'
+    | 'speedMinPerPage'
+    | 'pagesPerBlock'
+  >;
+}
+
 export interface PersistedPlanState {
   deadline: string;
   selectedDocIds: string[];
   orderedDocIds: string[];
   completedStepIds: string[];
+  diagnostic?: DiagnosticData;
 }
 
 export interface ToastItem {

@@ -2,7 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --sf-bg-app: 2 6 23;
+  --sf-bg-panel: 15 23 42;
+  --sf-bg-elevated: 30 41 59;
+  --sf-border-strong: 51 65 85;
+  --sf-text-muted: 71 85 105;
+  --sf-text-subtle: 100 116 139;
+  --sf-text-secondary: 148 163 184;
+  --sf-text-primary: 203 213 225;
+  --sf-text-bright: 226 232 240;
+  --sf-text-high: 241 245 249;
+  --sf-text-max: 248 250 252;
+  --sf-accent-50: 238 242 255;
+  --sf-accent-100: 224 231 255;
+  --sf-accent-200: 199 210 254;
+  --sf-accent-300: 165 180 252;
+  --sf-accent-400: 129 140 248;
+  --sf-accent-500: 99 102 241;
+  --sf-accent-600: 79 70 229;
+  --sf-accent-700: 67 56 202;
+  --sf-accent-800: 55 48 163;
+  --sf-accent-900: 49 46 129;
+  --sf-accent-950: 30 27 75;
+  --sf-paper-bg: #ffffff;
+  --sf-font-sans: 'Inter', system-ui, sans-serif;
+}
+
 @layer base {
+
   html,
   body,
   #root {
@@ -16,16 +44,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: rgb(var(--sf-bg-panel));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: rgb(var(--sf-border-strong));
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: rgb(var(--sf-text-subtle));
 }
 
 .fade-in {
@@ -37,6 +65,7 @@
     opacity: 0;
     transform: translateY(4px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -48,16 +77,19 @@
   border-color: #eab308;
   color: #713f12;
 }
+
 .note-cyan {
   background-color: #bae6fd;
   border-color: #0284c7;
   color: #0c4a6e;
 }
+
 .note-green {
   background-color: #bbf7d0;
   border-color: #16a34a;
   color: #14532d;
 }
+
 .note-lavender {
   background-color: #e9d5ff;
   border-color: #9333ea;
@@ -75,63 +107,195 @@
   line-height: 1.6;
   font-size: 14px;
 }
+
 .docx-sheet-content h1 {
   font-size: 1.55em;
   font-weight: 700;
   margin: 0.7em 0 0.35em;
   color: #020617;
 }
+
 .docx-sheet-content h2 {
   font-size: 1.3em;
   font-weight: 700;
   margin: 0.65em 0 0.3em;
   color: #0f172a;
 }
+
 .docx-sheet-content h3 {
   font-size: 1.12em;
   font-weight: 600;
   margin: 0.55em 0 0.25em;
   color: #1e293b;
 }
+
 .docx-sheet-content p {
   margin: 0 0 0.65em;
 }
+
 .docx-sheet-content ul,
 .docx-sheet-content ol {
   margin: 0.35em 0 0.75em 1.4em;
 }
+
 .docx-sheet-content ul {
   list-style-type: disc;
 }
+
 .docx-sheet-content ol {
   list-style-type: decimal;
 }
+
 .docx-sheet-content table {
   width: 100%;
   border-collapse: collapse;
   margin: 0.75em 0;
   font-size: 0.92em;
 }
+
 .docx-sheet-content th,
 .docx-sheet-content td {
   border: 1px solid #cbd5e1;
   padding: 6px 8px;
   text-align: left;
 }
+
 .docx-sheet-content th {
   background-color: #f1f5f9;
   font-weight: 600;
 }
+
 .docx-sheet-content img {
   max-width: 100%;
   height: auto;
   margin: 0.5em 0;
   border-radius: 4px;
 }
+
 .docx-sheet-content blockquote {
-  border-left: 3px solid #6366f1;
+  border-left: 3px solid rgb(var(--sf-accent-500));
   padding-left: 0.75em;
   color: #334155;
   margin: 0.5em 0;
 }
 
+/* Ajustes de radio de esquinas según preferencia del usuario */
+[data-ui-radius='sharp'] .rounded-2xl {
+  border-radius: 0.375rem;
+}
+
+[data-ui-radius='sharp'] .rounded-xl {
+  border-radius: 0.25rem;
+}
+
+[data-ui-radius='sharp'] .rounded-lg {
+  border-radius: 0.1875rem;
+}
+
+[data-ui-radius='soft'] .rounded-2xl {
+  border-radius: 1.35rem;
+}
+
+[data-ui-radius='soft'] .rounded-xl {
+  border-radius: 1rem;
+}
+
+[data-ui-radius='soft'] .rounded-lg {
+  border-radius: 0.75rem;
+}
+
+/* Adaptación automática de contraste para Modo Claro (Papel Académico) */
+[data-theme-mode='light'] .text-white {
+  color: rgb(var(--sf-text-max));
+}
+
+[data-theme-mode='light'] .hover\:text-white:hover {
+  color: rgb(var(--sf-text-max));
+}
+
+[data-theme-mode='light'] :is([class~='bg-indigo-600'],
+  [class~='bg-indigo-500'],
+  [class~='bg-emerald-600'],
+  [class~='bg-emerald-500'],
+  [class~='bg-rose-600'],
+  [class~='bg-sky-600'],
+  [class~='bg-purple-600'],
+  [class~='bg-amber-600'],
+  [class~='from-indigo-500'],
+  [class~='from-indigo-600']).text-white,
+[data-theme-mode='light'] :is([class~='bg-indigo-600'],
+  [class~='bg-indigo-500'],
+  [class~='bg-emerald-600'],
+  [class~='bg-emerald-500'],
+  [class~='bg-rose-600'],
+  [class~='bg-sky-600'],
+  [class~='bg-purple-600'],
+  [class~='bg-amber-600'],
+  [class~='from-indigo-500'],
+  [class~='from-indigo-600']) .text-white {
+  color: #ffffff;
+}
+
+[data-theme-mode='light'] .text-emerald-200,
+[data-theme-mode='light'] .text-emerald-300 {
+  color: #047857;
+}
+
+[data-theme-mode='light'] .text-sky-200,
+[data-theme-mode='light'] .text-sky-300 {
+  color: #0369a1;
+}
+
+[data-theme-mode='light'] .text-purple-200,
+[data-theme-mode='light'] .text-purple-300 {
+  color: #6d28d9;
+}
+
+[data-theme-mode='light'] .text-amber-200,
+[data-theme-mode='light'] .text-amber-300 {
+  color: #b45309;
+}
+
+[data-theme-mode='light'] .text-rose-200,
+[data-theme-mode='light'] .text-rose-300 {
+  color: #be123c;
+}
+
+[data-theme-mode='light'] .bg-emerald-950\/30,
+[data-theme-mode='light'] .bg-emerald-950\/50,
+[data-theme-mode='light'] .bg-emerald-950\/20,
+[data-theme-mode='light'] .bg-emerald-900\/60 {
+  background-color: rgba(16, 185, 129, 0.14);
+}
+
+[data-theme-mode='light'] .bg-amber-950\/30,
+[data-theme-mode='light'] .bg-amber-900\/60 {
+  background-color: rgba(245, 158, 11, 0.14);
+}
+
+[data-theme-mode='light'] .bg-rose-950\/30,
+[data-theme-mode='light'] .bg-rose-950\/60,
+[data-theme-mode='light'] .bg-rose-900\/60 {
+  background-color: rgba(244, 63, 94, 0.14);
+}
+
+[data-theme-mode='light'] .bg-sky-950\/30,
+[data-theme-mode='light'] .bg-sky-950\/20 {
+  background-color: rgba(14, 165, 233, 0.14);
+}
+
+[data-theme-mode='light'] .bg-purple-950\/30,
+[data-theme-mode='light'] .bg-purple-950\/25 {
+  background-color: rgba(168, 85, 247, 0.14);
+}
+
+[data-theme-mode='light'] .backdrop-blur-sm.bg-slate-950\/80,
+[data-theme-mode='light'] .backdrop-blur-md.bg-slate-950\/80,
+[data-theme-mode='light'] .backdrop-blur-sm.bg-slate-950\/65 {
+  background-color: rgba(15, 23, 42, 0.42);
+}
+
+[data-theme-mode='light'] .border-slate-700\/80,
+[data-theme-mode='light'] .border-slate-800\/80 {
+  border-color: rgba(203, 213, 225, 0.85);
+}

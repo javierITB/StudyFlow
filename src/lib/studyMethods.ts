@@ -1,8 +1,10 @@
 import { StudyMethodPreset, StudySettings } from '../types/studyflow';
+import { DEFAULT_APPEARANCE } from './themes';
 
 export const DEFAULT_STUDY_SETTINGS: StudySettings = {
   presetId: 'classic',
   intervalMode: 'time',
+  blockAllocationMode: 'pack',
   studyMinutes: 25,
   pagesPerBlock: 5,
   shortBreakMinutes: 5,
@@ -12,6 +14,7 @@ export const DEFAULT_STUDY_SETTINGS: StudySettings = {
   speedMinPerPage: 3,
   resumeFromCurrentPage: true,
   audioEnabled: true,
+  appearance: DEFAULT_APPEARANCE,
 };
 
 export const STUDY_METHOD_PRESETS: StudyMethodPreset[] = [

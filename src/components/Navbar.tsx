@@ -6,6 +6,7 @@ import {
   FileText,
   HardDrive,
   LayoutGrid,
+  Palette,
   Pause,
   Play,
   Volume2,
@@ -24,6 +25,7 @@ interface NavbarProps {
   user: UserProfile | null;
   syncStatus: 'local' | 'synced' | 'syncing' | 'error';
   onOpenAccountModal: () => void;
+  onOpenAppearanceModal: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -34,6 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   user,
   syncStatus,
   onOpenAccountModal,
+  onOpenAppearanceModal,
 }) => {
   const { mode, remainingSeconds, elapsedSeconds, isRunning, toggleTimer } = useTimer();
 
@@ -114,6 +117,17 @@ export const Navbar: React.FC<NavbarProps> = ({
           ) : (
             <Play className="w-3 h-3 text-slate-300" />
           )}
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenAppearanceModal}
+          title="Personalizar tema, colores y tipografía"
+          aria-label="Personalizar tema, colores y tipografía"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition-colors"
+        >
+          <Palette className="w-4 h-4 text-indigo-400" />
+          <span className="hidden lg:inline text-xs font-medium">Tema</span>
         </button>
 
         <button

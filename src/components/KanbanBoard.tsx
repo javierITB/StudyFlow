@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Download, LayoutGrid, Plus, Trash2, X } from 'lucide-react';
+import { Download, ExternalLink, LayoutGrid, Plus, Trash2, X } from 'lucide-react';
 import {
   DocumentRecord,
   FolderRecord,
@@ -16,6 +16,7 @@ interface KanbanBoardProps {
   onCreateNote: (note: Omit<StickyNoteRecord, 'id' | 'createdAt'>) => Promise<void>;
   onUpdateNote: (noteId: string, patch: Partial<StickyNoteRecord>) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
+  onOpenNoteLocation: (docId: string, page: number, noteId: string) => void;
   onNotify: (msg: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
 }
 
@@ -33,6 +34,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onCreateNote,
   onUpdateNote,
   onDeleteNote,
+  onOpenNoteLocation,
   onNotify,
 }) => {
   const [filterFolderId, setFilterFolderId] = useState<string>('all');
@@ -229,10 +231,27 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                         } transition-transform active:scale-95 cursor-grab`}
                       >
                         <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-black/10 text-[10px] font-semibold select-none">
-                          <div className="min-w-0 truncate max-w-[155px]">
-                            <span title={doc ? doc.name : 'Nota General'}>
-                              {doc ? doc.name : 'Nota General'}
-                            </span>
+                          <div className="min-w-0 truncate max-w-[145px]">
+                            {doc ? (
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onOpenNoteLocation(
+                                    doc.id,
+                                    note.page || doc.currentPage || 1,
+                                    note.id
+                                  );
+                                }}
+                                className="text-left hover:underline truncate max-w-full block"
+                                title={`Abrir ${doc.name} en página ${note.page || doc.currentPage || 1}`}
+                              >
+                                {doc.name}
+                              </button>
+                            ) : (
+                              <span>Nota General</span>
+                            )}
                             {folder && (
                               <span className="block text-[9px] opacity-75 truncate">
                                 {folder.name}
@@ -240,14 +259,36 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                             )}
                           </div>
                           <div className="flex items-center space-x-1 flex-shrink-0">
-                            {note.page && (
-                              <span className="bg-black/10 px-1 rounded font-mono">
-                                P.{note.page}
-                              </span>
+                            {doc && (
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onOpenNoteLocation(
+                                    doc.id,
+                                    note.page || doc.currentPage || 1,
+                                    note.id
+                                  );
+                                }}
+                                title={`Ir al documento (Pág. ${note.page || doc.currentPage || 1})`}
+                                className="bg-black/15 hover:bg-black/25 px-1.5 py-0.5 rounded font-mono inline-flex items-center gap-0.5 transition-colors"
+                              >
+                                <span>
+                                  {note.page
+                                    ? `${doc.fileType === 'pptx' ? 'S' : 'P'}.${note.page}`
+                                    : 'Ir'}
+                                </span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </button>
                             )}
                             <button
                               type="button"
-                              onClick={() => void onDeleteNote(note.id)}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void onDeleteNote(note.id);
+                              }}
                               title="Eliminar nota"
                               className="p-0.5 rounded hover:bg-black/15"
                             >
@@ -258,6 +299,30 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                         <p className="text-xs leading-relaxed whitespace-pre-wrap">
                           {note.content || '(Sin texto)'}
                         </p>
+                        {doc && (
+                          <div className="mt-2 pt-1.5 border-t border-black/10 flex justify-end">
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenNoteLocation(
+                                  doc.id,
+                                  note.page || doc.currentPage || 1,
+                                  note.id
+                                );
+                              }}
+                              className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-black/10 hover:bg-black/20 inline-flex items-center gap-1 transition-colors"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span>
+                                {note.page
+                                  ? `Ir a ${doc.fileType === 'pptx' ? 'slide' : 'página'} ${note.page}`
+                                  : 'Abrir documento'}
+                              </span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

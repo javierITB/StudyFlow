@@ -1,31 +1,50 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  FileSpreadsheet,
   FileText,
   Folder,
+  FolderInput,
+  FolderOpen,
   FolderPlus,
+  GripVertical,
   Loader2,
   Presentation,
+  Route,
+  Sliders,
   Trash2,
   UploadCloud,
-  FileSpreadsheet,
 } from 'lucide-react';
-import { DocumentRecord, FolderColor, FolderRecord } from '../types/studyflow';
+import {
+  DocumentRecord,
+  FolderColor,
+  FolderRecord,
+  RouteStep,
+  StudyPlanResult,
+} from '../types/studyflow';
 import { FOLDER_COLOR_CLASSES, formatFileSize } from '../lib/documentUtils';
+import { RouteTimeline } from './RouteTimeline';
 
 interface DocumentSidebarProps {
   folders: FolderRecord[];
   documents: DocumentRecord[];
   activeDocId: string | null;
-  selectedFolderFilter: string; // 'all' | 'unassigned' | folder.id
+  speedMinPerPage: number;
   isUploading: boolean;
   syncStatusLabel: string;
-  onSelectFolderFilter: (filterId: string) => void;
+  planResult: StudyPlanResult;
+  activeRouteStepId: string | null;
   onCreateFolder: (name: string, color: FolderColor) => Promise<void>;
   onDeleteFolder: (folder: FolderRecord) => void;
-  onUploadFiles: (files: FileList) => Promise<void>;
+  onUploadFiles: (files: FileList, targetFolderId?: string | null) => Promise<void>;
   onOpenDocument: (docId: string) => void;
   onMoveDocumentToFolder: (docId: string, folderId: string | null) => Promise<void>;
   onDeleteDocument: (doc: DocumentRecord) => void;
+  onStartRouteStep: (step: RouteStep, nextStep: RouteStep | null) => void;
+  onToggleStepCompleted: (stepId: string) => Promise<void>;
+  onOpenPlannerTab: () => void;
 }
 
 const FOLDER_COLORS: FolderColor[] = [
@@ -37,33 +56,69 @@ const FOLDER_COLORS: FolderColor[] = [
   'rose',
 ];
 
+function formatAcademicTime(pages: number, speedMinPerPage: number): string {
+  const mins = Math.round(pages * Math.max(0.5, speedMinPerPage));
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   folders,
   documents,
   activeDocId,
-  selectedFolderFilter,
+  speedMinPerPage,
   isUploading,
   syncStatusLabel,
-  onSelectFolderFilter,
+  planResult,
+  activeRouteStepId,
   onCreateFolder,
   onDeleteFolder,
   onUploadFiles,
   onOpenDocument,
   onMoveDocumentToFolder,
   onDeleteDocument,
+  onStartRouteStep,
+  onToggleStepCompleted,
+  onOpenPlannerTab,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadFolderTargetRef = useRef<string | null>(null);
+
+  const [sidebarTab, setSidebarTab] = useState<'files' | 'route'>('files');
   const [isDragOverUpload, setIsDragOverUpload] = useState(false);
   const [showNewFolderForm, setShowNewFolderForm] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderColor, setNewFolderColor] = useState<FolderColor>('indigo');
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
-  const filteredDocs = documents.filter((doc) => {
-    if (selectedFolderFilter === 'all') return true;
-    if (selectedFolderFilter === 'unassigned') return !doc.folderId;
-    return doc.folderId === selectedFolderFilter;
-  });
+  // Estado colapsado por carpeta (por defecto todas abiertas para ver las hojas agrupadas)
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [moveMenuDocId, setMoveMenuDocId] = useState<string | null>(null);
+
+  const unassignedDocs = useMemo(
+    () => documents.filter((d) => !d.folderId),
+    [documents]
+  );
+
+  const totalPagesAll = useMemo(
+    () => documents.reduce((acc, d) => acc + (d.pageCount || 0), 0),
+    [documents]
+  );
+
+  const studySteps = useMemo(
+    () => planResult.steps.filter((s) => s.type === 'study'),
+    [planResult.steps]
+  );
+  const completedStudyStepsCount = studySteps.filter((s) => s.completed).length;
+
+  const toggleFolderExpanded = (folderKey: string) => {
+    setCollapsedFolders((prev) => ({
+      ...prev,
+      [folderKey]: !prev[folderKey],
+    }));
+  };
 
   const handleCreateFolderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,11 +131,30 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
 
   const handleFolderDrop = async (e: React.DragEvent, targetFolderId: string | null) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragOverFolderId(null);
-    const docId = e.dataTransfer.getData('application/x-studyflow-doc');
-    if (docId) {
-      await onMoveDocumentToFolder(docId, targetFolderId);
+
+    const internalDocId = e.dataTransfer.getData('application/x-studyflow-doc');
+    if (internalDocId) {
+      await onMoveDocumentToFolder(internalDocId, targetFolderId);
+      if (targetFolderId) {
+        setCollapsedFolders((prev) => ({ ...prev, [targetFolderId]: false }));
+      }
+      return;
     }
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      await onUploadFiles(e.dataTransfer.files, targetFolderId);
+      if (targetFolderId) {
+        setCollapsedFolders((prev) => ({ ...prev, [targetFolderId]: false }));
+      }
+    }
+  };
+
+  const triggerUploadIntoFolder = (folderId: string | null) => {
+    if (isUploading) return;
+    uploadFolderTargetRef.current = folderId;
+    fileInputRef.current?.click();
   };
 
   const renderDocIcon = (doc: DocumentRecord, active: boolean) => {
@@ -94,14 +168,156 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
 
     return (
       <div
-        className={`w-7 h-7 rounded-lg ${colorClass} flex items-center justify-center flex-shrink-0 mt-0.5`}
+        className={`w-6 h-6 rounded-md ${colorClass} flex items-center justify-center flex-shrink-0`}
       >
         {doc.fileType === 'pptx' ? (
-          <Presentation className="w-4 h-4" />
+          <Presentation className="w-3.5 h-3.5" />
         ) : doc.fileType === 'docx' ? (
-          <FileSpreadsheet className="w-4 h-4" />
+          <FileSpreadsheet className="w-3.5 h-3.5" />
         ) : (
-          <FileText className="w-4 h-4" />
+          <FileText className="w-3.5 h-3.5" />
+        )}
+      </div>
+    );
+  };
+
+  const renderDocumentLeaf = (doc: DocumentRecord) => {
+    const isActive = doc.id === activeDocId;
+    const progressPct = Math.min(
+      100,
+      Math.round(((doc.currentPage || 1) / Math.max(1, doc.pageCount)) * 100)
+    );
+    const isMoveOpen = moveMenuDocId === doc.id;
+
+    return (
+      <div key={doc.id} className="relative">
+        <div
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('application/x-studyflow-doc', doc.id);
+            e.dataTransfer.effectAllowed = 'move';
+          }}
+          className={`group relative rounded-lg border px-2.5 py-2 transition-all ${
+            isActive
+              ? 'bg-indigo-950/50 border-indigo-500/80 shadow-sm shadow-indigo-950/50'
+              : 'bg-slate-900/90 border-slate-800/90 hover:border-slate-700 hover:bg-slate-900'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span
+              className="text-slate-600 hover:text-slate-400 cursor-grab active:cursor-grabbing flex-shrink-0"
+              title="Arrastra hacia otra carpeta"
+            >
+              <GripVertical className="w-3.5 h-3.5" />
+            </span>
+
+            <div
+              onClick={() => onOpenDocument(doc.id)}
+              className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
+            >
+              {renderDocIcon(doc, isActive)}
+              <div className="min-w-0 flex-1">
+                <h4
+                  className="text-[11px] font-semibold text-slate-100 truncate leading-tight"
+                  title={doc.name}
+                >
+                  {doc.name}
+                </h4>
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5">
+                  <span className="uppercase font-mono text-[9px] px-1 rounded bg-slate-800 text-slate-300">
+                    {doc.fileType}
+                  </span>
+                  <span className="font-mono">
+                    {doc.currentPage}/{doc.pageCount}{' '}
+                    {doc.fileType === 'pptx' ? 'slides' : 'págs'}
+                  </span>
+                  <span className="text-slate-600">•</span>
+                  <span>{formatFileSize(doc.size)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMoveMenuDocId(isMoveOpen ? null : doc.id);
+                }}
+                title="Mover a otra carpeta"
+                className="p-1 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <FolderInput className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteDocument(doc);
+                }}
+                title="Eliminar documento"
+                className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="w-full h-1 bg-slate-800/80 rounded-full mt-1.5 overflow-hidden">
+            <div
+              className="h-full bg-indigo-500 rounded-full transition-all"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Menu rapido contextual para mover sin tener dropdown fijo en cada tarjeta */}
+        {isMoveOpen && (
+          <div className="mt-1 p-1.5 rounded-lg bg-slate-950 border border-slate-700 shadow-xl space-y-0.5 text-[11px] z-30 relative fade-in">
+            <div className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Mover hoja a:
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMoveMenuDocId(null);
+                void onMoveDocumentToFolder(doc.id, null);
+              }}
+              className={`w-full text-left px-2 py-1 rounded flex items-center justify-between ${
+                !doc.folderId
+                  ? 'bg-slate-800 text-white'
+                  : 'text-slate-300 hover:bg-slate-800/70'
+              }`}
+            >
+              <span>Sin carpeta</span>
+              {!doc.folderId && <Check className="w-3 h-3 text-indigo-400" />}
+            </button>
+            {folders.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => {
+                  setMoveMenuDocId(null);
+                  void onMoveDocumentToFolder(doc.id, f.id);
+                }}
+                className={`w-full text-left px-2 py-1 rounded flex items-center justify-between ${
+                  doc.folderId === f.id
+                    ? 'bg-indigo-600/30 text-white'
+                    : 'text-slate-300 hover:bg-slate-800/70'
+                }`}
+              >
+                <span className="flex items-center gap-1.5 truncate">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      FOLDER_COLOR_CLASSES[f.color || 'indigo'].dot
+                    }`}
+                  />
+                  <span className="truncate">{f.name}</span>
+                </span>
+                {doc.folderId === f.id && <Check className="w-3 h-3 text-indigo-400" />}
+              </button>
+            ))}
+          </div>
         )}
       </div>
     );
@@ -109,326 +325,436 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
 
   return (
     <aside className="w-full md:w-80 lg:w-96 border-r border-slate-800 bg-slate-900/60 flex flex-col flex-shrink-0 h-2/5 md:h-full overflow-hidden">
-      {/* Subida de archivos */}
-      <div className="p-4 border-b border-slate-800 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Material de Estudio
-          </h2>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
-            {documents.length} docs
-          </span>
-        </div>
-
-        <div
-          onClick={() => !isUploading && fileInputRef.current?.click()}
-          onDragEnter={(e) => {
-            e.preventDefault();
-            setIsDragOverUpload(true);
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragOverUpload(true);
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            setIsDragOverUpload(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            setIsDragOverUpload(false);
-            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-              void onUploadFiles(e.dataTransfer.files);
-            }
-          }}
-          className={`border-2 border-dashed rounded-xl p-3.5 text-center cursor-pointer transition-colors ${
-            isDragOverUpload
-              ? 'border-indigo-500 bg-indigo-500/10'
-              : 'border-slate-700 hover:border-indigo-500 bg-slate-950/40'
-          }`}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.docx,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files && e.target.files.length > 0) {
-                void onUploadFiles(e.target.files);
-              }
-              e.target.value = '';
-            }}
-          />
-          <div className="flex flex-col items-center pointer-events-none">
-            {isUploading ? (
-              <Loader2 className="w-7 h-7 text-indigo-400 mb-1 animate-spin" />
-            ) : (
-              <UploadCloud className="w-7 h-7 text-indigo-400 mb-1" />
-            )}
-            <p className="text-xs font-medium text-slate-200">
-              {isUploading ? 'Procesando archivo...' : 'Arrastra PDF, DOCX o PPTX'}
-            </p>
-            <p className="text-[10px] text-slate-400 mt-0.5">
-              Soporta apuntes, guías y diapositivas
-            </p>
-          </div>
+      {/* Switch Compacto Archivos | Ruta del Plan */}
+      <div className="px-3 pt-3 pb-2 border-b border-slate-800 bg-slate-900/90">
+        <div className="grid grid-cols-2 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+          <button
+            type="button"
+            onClick={() => setSidebarTab('files')}
+            className={`py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+              sidebarTab === 'files'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Archivos ({documents.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSidebarTab('route')}
+            className={`py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+              sidebarTab === 'route'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Route className="w-3.5 h-3.5" />
+            <span>
+              Ruta ({completedStudyStepsCount}/{studySteps.length})
+            </span>
+          </button>
         </div>
       </div>
 
-      {/* Carpetas / Ramos */}
-      <div className="px-3 py-2.5 border-b border-slate-800 bg-slate-950/40 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            Carpetas / Ramos
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowNewFolderForm((v) => !v)}
-            className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium"
-          >
-            <FolderPlus className="w-3.5 h-3.5" />
-            <span>Nueva</span>
-          </button>
-        </div>
-
-        {showNewFolderForm && (
-          <form
-            onSubmit={handleCreateFolderSubmit}
-            className="p-2 rounded-lg bg-slate-900 border border-slate-700 space-y-2 fade-in"
-          >
-            <input
-              type="text"
-              value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
-              placeholder="Ej. Cálculo II, Anatomía..."
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
-              autoFocus
-            />
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                {FOLDER_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setNewFolderColor(c)}
-                    className={`w-4 h-4 rounded-full ${FOLDER_COLOR_CLASSES[c].dot} ${
-                      newFolderColor === c ? 'ring-2 ring-white scale-110' : 'opacity-65'
-                    }`}
-                  />
-                ))}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setShowNewFolderForm(false)}
-                  className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="text-[10px] px-2.5 py-1 rounded bg-indigo-600 text-white font-semibold"
-                >
-                  Crear
-                </button>
+      {sidebarTab === 'files' ? (
+        <>
+          {/* Subida de archivos */}
+          <div className="p-3 border-b border-slate-800 space-y-2.5">
+            <div
+              onClick={() => triggerUploadIntoFolder(null)}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                setIsDragOverUpload(true);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOverUpload(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setIsDragOverUpload(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOverUpload(false);
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                  void onUploadFiles(e.dataTransfer.files, null);
+                }
+              }}
+              className={`border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-colors ${
+                isDragOverUpload
+                  ? 'border-indigo-500 bg-indigo-500/10'
+                  : 'border-slate-700 hover:border-indigo-500 bg-slate-950/40'
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    const target = uploadFolderTargetRef.current;
+                    uploadFolderTargetRef.current = null;
+                    void onUploadFiles(e.target.files, target);
+                  }
+                  e.target.value = '';
+                }}
+              />
+              <div className="flex flex-col items-center pointer-events-none">
+                {isUploading ? (
+                  <Loader2 className="w-6 h-6 text-indigo-400 mb-1 animate-spin" />
+                ) : (
+                  <UploadCloud className="w-6 h-6 text-indigo-400 mb-1" />
+                )}
+                <p className="text-xs font-medium text-slate-200">
+                  {isUploading ? 'Procesando archivo...' : 'Arrastra PDF, DOCX o PPTX'}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  O suéltalos directo sobre una carpeta
+                </p>
               </div>
             </div>
-          </form>
-        )}
 
-        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-          <button
-            type="button"
-            onClick={() => onSelectFolderFilter('all')}
-            className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
-              selectedFolderFilter === 'all'
-                ? 'bg-indigo-600 text-white border-indigo-500'
-                : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
-            }`}
-          >
-            Todos ({documents.length})
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onSelectFolderFilter('unassigned')}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragOverFolderId('unassigned');
-            }}
-            onDragLeave={() => setDragOverFolderId(null)}
-            onDrop={(e) => void handleFolderDrop(e, null)}
-            className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
-              selectedFolderFilter === 'unassigned'
-                ? 'bg-slate-700 text-white border-slate-500'
-                : dragOverFolderId === 'unassigned'
-                  ? 'bg-indigo-500/20 border-indigo-400 text-white'
-                  : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
-            }`}
-          >
-            Sin carpeta ({documents.filter((d) => !d.folderId).length})
-          </button>
-
-          {folders.map((folder) => {
-            const count = documents.filter((d) => d.folderId === folder.id).length;
-            const active = selectedFolderFilter === folder.id;
-            const colorCfg = FOLDER_COLOR_CLASSES[folder.color || 'indigo'];
-            return (
-              <div
-                key={folder.id}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOverFolderId(folder.id);
-                }}
-                onDragLeave={() => setDragOverFolderId(null)}
-                onDrop={(e) => void handleFolderDrop(e, folder.id)}
-                className={`group inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors cursor-pointer ${
-                  active
-                    ? 'bg-indigo-600/25 text-white border-indigo-500'
-                    : dragOverFolderId === folder.id
-                      ? 'bg-indigo-500/20 border-indigo-400 text-white'
-                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
-                }`}
-                onClick={() => onSelectFolderFilter(folder.id)}
-              >
-                <span className={`w-2 h-2 rounded-full ${colorCfg.dot}`} />
-                <Folder className="w-3 h-3 opacity-70" />
-                <span className="truncate max-w-[100px]">{folder.name}</span>
-                <span className="font-mono text-[10px] opacity-70">({count})</span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteFolder(folder);
-                  }}
-                  title="Eliminar carpeta"
-                  className="opacity-0 group-hover:opacity-100 hover:text-rose-400 ml-0.5 transition-opacity"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
+            {/* Encabezado Carpetas + Carga academica total */}
+            <div className="flex items-center justify-between pt-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Carpetas / Ramos
+                </span>
+                {documents.length > 0 && (
+                  <span className="text-[10px] font-mono text-slate-400">
+                    ({totalPagesAll} págs)
+                  </span>
+                )}
               </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Lista de Documentos */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {filteredDocs.length === 0 ? (
-          <div className="text-center py-8 px-4 text-slate-400">
-            <FileText className="w-9 h-9 mx-auto text-slate-600 mb-2" />
-            <p className="text-xs font-medium text-slate-400">
-              {documents.length === 0
-                ? 'Sin documentos cargados'
-                : 'No hay archivos en esta carpeta'}
-            </p>
-            <p className="text-[11px] text-slate-500 mt-1">
-              Sube archivos PDF, DOCX o PPTX para leer, fijar post-its y planificar tu ruta.
-            </p>
-          </div>
-        ) : (
-          filteredDocs.map((doc) => {
-            const isActive = doc.id === activeDocId;
-            const folder = folders.find((f) => f.id === doc.folderId);
-            const progressPct = Math.min(
-              100,
-              Math.round(((doc.currentPage || 1) / Math.max(1, doc.pageCount)) * 100)
-            );
-
-            return (
-              <div
-                key={doc.id}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('application/x-studyflow-doc', doc.id);
-                }}
-                className={`p-3 rounded-xl border transition-all ${
-                  isActive
-                    ? 'bg-indigo-950/40 border-indigo-500/80 shadow-md shadow-indigo-950/50'
-                    : 'bg-slate-900 border-slate-800 hover:border-slate-700'
-                }`}
+              <button
+                type="button"
+                onClick={() => setShowNewFolderForm((v) => !v)}
+                className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div
-                    className="flex items-start space-x-2.5 min-w-0 flex-1 cursor-pointer"
-                    onClick={() => onOpenDocument(doc.id)}
-                  >
-                    {renderDocIcon(doc, isActive)}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <h4
-                          className="text-xs font-semibold text-white truncate"
-                          title={doc.name}
-                        >
-                          {doc.name}
-                        </h4>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-400 mt-0.5">
-                        <span className="uppercase font-mono px-1 rounded bg-slate-800 text-slate-300">
-                          {doc.fileType}
-                        </span>
-                        <span className="font-mono">
-                          {doc.currentPage}/{doc.pageCount}{' '}
-                          {doc.fileType === 'pptx' ? 'slides' : 'págs'}
-                        </span>
-                        <span>•</span>
-                        <span>{formatFileSize(doc.size)}</span>
-                      </div>
-                      <div className="w-full h-1 bg-slate-800 rounded-full mt-1.5 overflow-hidden">
+                <FolderPlus className="w-3.5 h-3.5" />
+                <span>Nueva carpeta</span>
+              </button>
+            </div>
+
+            {showNewFolderForm && (
+              <form
+                onSubmit={handleCreateFolderSubmit}
+                className="p-2.5 rounded-xl bg-slate-950 border border-slate-700 space-y-2 fade-in"
+              >
+                <input
+                  type="text"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  placeholder="Ej. Cálculo II, Derecho Civil..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  autoFocus
+                />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    {FOLDER_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setNewFolderColor(c)}
+                        className={`w-4 h-4 rounded-full ${FOLDER_COLOR_CLASSES[c].dot} ${
+                          newFolderColor === c ? 'ring-2 ring-white scale-110' : 'opacity-65'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowNewFolderForm(false)}
+                      className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="text-[10px] px-2.5 py-1 rounded bg-indigo-600 text-white font-semibold"
+                    >
+                      Crear
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* Arbol vertical de Folders tipo archivador con hojas hacia abajo */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {documents.length === 0 && folders.length === 0 ? (
+              <div className="text-center py-8 px-4 text-slate-400">
+                <Folder className="w-9 h-9 mx-auto text-slate-600 mb-2" />
+                <p className="text-xs font-medium text-slate-400">
+                  Sin carpetas ni documentos todavía
+                </p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Crea carpetas para tus ramos y agrupa tus PDF, DOCX o PPTX debajo de cada una.
+                </p>
+              </div>
+            ) : (
+              <>
+                {folders.map((folder) => {
+                  const folderDocs = documents.filter((d) => d.folderId === folder.id);
+                  const folderPages = folderDocs.reduce(
+                    (acc, d) => acc + (d.pageCount || 0),
+                    0
+                  );
+                  const readPages = folderDocs.reduce(
+                    (acc, d) =>
+                      acc + Math.min(d.pageCount || 1, Math.max(0, (d.currentPage || 1) - 1)),
+                    0
+                  );
+                  const folderPct =
+                    folderPages > 0 ? Math.round((readPages / folderPages) * 100) : 0;
+                  const isCollapsed = Boolean(collapsedFolders[folder.id]);
+                  const isDragTarget = dragOverFolderId === folder.id;
+                  const colorCfg = FOLDER_COLOR_CLASSES[folder.color || 'indigo'];
+
+                  return (
+                    <div
+                      key={folder.id}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOverFolderId(folder.id);
+                      }}
+                      onDragLeave={() => setDragOverFolderId(null)}
+                      onDrop={(e) => void handleFolderDrop(e, folder.id)}
+                      className="group/folder"
+                    >
+                      {/* Pestaña superior estética del folder */}
+                      <div className="flex items-end pl-1">
                         <div
-                          className="h-full bg-indigo-500 rounded-full transition-all"
-                          style={{ width: `${progressPct}%` }}
+                          className={`h-1.5 w-16 rounded-t-md ${colorCfg.tabBg} opacity-90`}
                         />
                       </div>
+
+                      {/* Cuerpo principal del Folder */}
+                      <div
+                        className={`rounded-xl rounded-tl-none border transition-all overflow-hidden ${
+                          isDragTarget
+                            ? 'border-indigo-400 bg-indigo-500/15 ring-2 ring-indigo-500/40'
+                            : `${colorCfg.border} ${colorCfg.headerBg}`
+                        }`}
+                      >
+                        <div
+                          onClick={() => toggleFolderExpanded(folder.id)}
+                          className="p-2.5 flex items-center justify-between gap-2 cursor-pointer select-none hover:bg-white/[0.02]"
+                        >
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <span className="text-slate-400 flex-shrink-0">
+                              {isCollapsed ? (
+                                <ChevronRight className="w-4 h-4" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4" />
+                              )}
+                            </span>
+                            {isCollapsed ? (
+                              <Folder className={`w-4 h-4 flex-shrink-0 ${colorCfg.iconText}`} />
+                            ) : (
+                              <FolderOpen
+                                className={`w-4 h-4 flex-shrink-0 ${colorCfg.iconText}`}
+                              />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-bold text-white truncate">
+                                  {folder.name}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-300/80 font-mono mt-0.5">
+                                <span>
+                                  {folderDocs.length}{' '}
+                                  {folderDocs.length === 1 ? 'archivo' : 'archivos'}
+                                </span>
+                                <span>•</span>
+                                <span>{folderPages} págs</span>
+                                {folderPages > 0 && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="text-indigo-300">
+                                      ~{formatAcademicTime(folderPages, speedMinPerPage)}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                triggerUploadIntoFolder(folder.id);
+                              }}
+                              title={`Subir archivos en "${folder.name}"`}
+                              className="px-1.5 py-0.5 rounded bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-[10px] text-slate-300 opacity-0 group-hover/folder:opacity-100 transition-opacity"
+                            >
+                              + Subir
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteFolder(folder);
+                              }}
+                              title="Eliminar carpeta"
+                              className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-900/70 opacity-0 group-hover/folder:opacity-100 transition-opacity"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Barra de carga/avance del folder */}
+                        {folderPages > 0 && (
+                          <div className="px-2.5 pb-2">
+                            <div className="w-full h-1 bg-slate-950/70 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${colorCfg.dot} transition-all`}
+                                style={{ width: `${folderPct}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Hojas (documentos) apiladas dentro del folder */}
+                        {!isCollapsed && (
+                          <div className="px-2.5 pb-2.5 pt-1 bg-slate-950/45 border-t border-slate-800/70">
+                            {folderDocs.length === 0 ? (
+                              <div className="py-3 text-center text-[11px] text-slate-500 border border-dashed border-slate-800 rounded-lg">
+                                Arrastra hojas aquí para agrupar en {folder.name}
+                              </div>
+                            ) : (
+                              <div
+                                className={`pl-2.5 border-l-2 ${colorCfg.guideBorder} space-y-1.5`}
+                              >
+                                {folderDocs.map((doc) => renderDocumentLeaf(doc))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  );
+                })}
 
-                  <button
-                    type="button"
-                    onClick={() => onDeleteDocument(doc)}
-                    title="Eliminar documento"
-                    className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 flex-shrink-0"
+                {/* Carpeta de materiales sueltos / sin asignar */}
+                {(unassignedDocs.length > 0 || folders.length > 0) && (
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverFolderId('unassigned');
+                    }}
+                    onDragLeave={() => setDragOverFolderId(null)}
+                    onDrop={(e) => void handleFolderDrop(e, null)}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Selector rapido de carpeta */}
-                <div className="mt-2 pt-2 border-t border-slate-800/70 flex items-center justify-between gap-2">
-                  {folder ? (
-                    <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded border truncate max-w-[130px] ${
-                        FOLDER_COLOR_CLASSES[folder.color || 'indigo'].badge
+                    <div className="flex items-end pl-1">
+                      <div className="h-1 w-14 rounded-t-md bg-slate-700" />
+                    </div>
+                    <div
+                      className={`rounded-xl rounded-tl-none border transition-all overflow-hidden ${
+                        dragOverFolderId === 'unassigned'
+                          ? 'border-indigo-400 bg-indigo-500/10'
+                          : 'border-slate-800 bg-slate-900/50'
                       }`}
                     >
-                      {folder.name}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-500">Sin carpeta</span>
-                  )}
+                      <div
+                        onClick={() => toggleFolderExpanded('unassigned')}
+                        className="p-2.5 flex items-center justify-between gap-2 cursor-pointer select-none hover:bg-white/[0.02]"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-slate-400">
+                            {collapsedFolders['unassigned'] ? (
+                              <ChevronRight className="w-4 h-4" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4" />
+                            )}
+                          </span>
+                          <Folder className="w-4 h-4 text-slate-400" />
+                          <div className="min-w-0">
+                            <span className="text-xs font-semibold text-slate-200 block">
+                              Sin carpeta
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {unassignedDocs.length}{' '}
+                              {unassignedDocs.length === 1 ? 'archivo' : 'archivos'} •{' '}
+                              {unassignedDocs.reduce(
+                                (acc, d) => acc + (d.pageCount || 0),
+                                0
+                              )}{' '}
+                              págs
+                            </span>
+                          </div>
+                        </div>
+                      </div>
 
-                  <select
-                    value={doc.folderId || ''}
-                    onChange={(e) =>
-                      void onMoveDocumentToFolder(doc.id, e.target.value || null)
-                    }
-                    className="bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[10px] text-slate-300 focus:outline-none focus:border-indigo-500 max-w-[140px]"
-                    title="Asignar carpeta o ramo"
-                  >
-                    <option value="">Sin carpeta</option>
-                    {folders.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+                      {!collapsedFolders['unassigned'] && unassignedDocs.length > 0 && (
+                        <div className="px-2.5 pb-2.5 pt-1 bg-slate-950/35 border-t border-slate-800/70">
+                          <div className="pl-2.5 border-l-2 border-slate-700/70 space-y-1.5">
+                            {unassignedDocs.map((doc) => renderDocumentLeaf(doc))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      ) : (
+        /* Pestaña integrada de Ruta del Plan dentro de la vista de lectura */
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="px-3.5 py-2.5 border-b border-slate-800 bg-slate-950/50 space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-slate-300 font-medium">
+                {completedStudyStepsCount} de {studySteps.length} bloques completados
+              </span>
+              <button
+                type="button"
+                onClick={onOpenPlannerTab}
+                className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium"
+              >
+                <Sliders className="w-3 h-3" />
+                <span>Ajustar plan</span>
+              </button>
+            </div>
+            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-indigo-500 rounded-full transition-all"
+                style={{
+                  width: `${
+                    studySteps.length > 0
+                      ? Math.round((completedStudyStepsCount / studySteps.length) * 100)
+                      : 0
+                  }%`,
+                }}
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 leading-snug">
+              {planResult.recommendation}
+            </p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3">
+            <RouteTimeline
+              planResult={planResult}
+              activeRouteStepId={activeRouteStepId}
+              compact
+              onStartRouteStep={onStartRouteStep}
+              onToggleStepCompleted={onToggleStepCompleted}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Estado de almacenamiento */}
       <div className="p-3 border-t border-slate-800 bg-slate-900/80 flex items-center justify-between text-[11px] text-slate-400">
@@ -438,4 +764,3 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
     </aside>
   );
 };
-

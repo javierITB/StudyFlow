@@ -1,17 +1,30 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppearanceSettings,
+  DiagnosticCriterion,
+  DiagnosticData,
+  DiagnosticRecommendation,
   DocumentRecord,
+  DocumentType,
   FolderColor,
   FolderRecord,
   PersistedPlanState,
+  RouteSegment,
   RouteStep,
   StickyNoteRecord,
+  StudyPlanResult,
   StudySettings,
   TaskRecord,
   ToastItem,
   UserProfile,
 } from './types/studyflow';
 import { DEFAULT_STUDY_SETTINGS } from './lib/studyMethods';
+import {
+  applyAppearanceToDocument,
+  DEFAULT_APPEARANCE,
+  resolveAppearance,
+} from './lib/themes';
+import { mergeReadingSample } from './lib/diagnosticEngine';
 import { generateStudyRoute, getDefaultDeadlineLocalString } from './lib/routePlanner';
 import {
   clearAllLocalData,
@@ -50,6 +63,14 @@ import { KanbanBoard } from './components/KanbanBoard';
 import { ConfirmModal } from './components/ConfirmModal';
 import { ToastContainer } from './components/ToastContainer';
 import { AccountModal } from './components/AccountModal';
+import { DiagnosticModal } from './components/DiagnosticModal';
+import { AppearanceModal } from './components/AppearanceModal';
+
+const DEFAULT_DIAGNOSTIC_DATA: DiagnosticData = {
+  isActive: false,
+  criterion: 'balanced',
+  samples: [],
+};
 
 interface PendingConfirm {
   title: string;
@@ -68,19 +89,20 @@ interface WorkspaceShellProps {
   tasks: TaskRecord[];
   studySettings: StudySettings;
   planState: PersistedPlanState;
+  planResult: StudyPlanResult;
   activeDocId: string | null;
   activeBuffer: ArrayBuffer | null;
+  highlightedNoteId: string | null;
   isLoadingBuffer: boolean;
   isUploading: boolean;
-  selectedFolderFilter: string;
-  setSelectedFolderFilter: (id: string) => void;
   user: UserProfile | null;
   syncStatus: 'local' | 'synced' | 'syncing' | 'error';
   onOpenAccountModal: () => void;
+  onOpenAppearanceModal: () => void;
   onToggleAudio: () => Promise<void>;
   onCreateFolder: (name: string, color: FolderColor) => Promise<void>;
   onDeleteFolder: (folder: FolderRecord) => void;
-  onUploadFiles: (files: FileList) => Promise<void>;
+  onUploadFiles: (files: FileList, targetFolderId?: string | null) => Promise<void>;
   onOpenDocument: (docId: string, pageOverride?: number) => Promise<void>;
   onMoveDocumentToFolder: (docId: string, folderId: string | null) => Promise<void>;
   onDeleteDocument: (doc: DocumentRecord) => void;
@@ -88,6 +110,18 @@ interface WorkspaceShellProps {
   onCreateNote: (note: Omit<StickyNoteRecord, 'id' | 'createdAt'>) => Promise<void>;
   onUpdateNote: (noteId: string, patch: Partial<StickyNoteRecord>) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
+  onOpenNoteLocation: (docId: string, page: number, noteId: string) => void;
+  diagnosticData: DiagnosticData;
+  onToggleDiagnostic: (active: boolean) => void;
+  onRecordDiagnosticSample: (sample: {
+    docId: string;
+    docName: string;
+    fileType: DocumentType;
+    page: number;
+    addedSeconds: number;
+  }) => void;
+  onOpenDiagnosticModal: () => void;
+  onStartDiagnosticInViewer: () => void;
   onUpdateSettings: (next: StudySettings) => Promise<void>;
   onUpdatePlanState: (patch: Partial<PersistedPlanState>) => Promise<void>;
   onToggleStepCompleted: (stepId: string) => Promise<void>;
@@ -106,15 +140,16 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   tasks,
   studySettings,
   planState,
+  planResult,
   activeDocId,
   activeBuffer,
+  highlightedNoteId,
   isLoadingBuffer,
   isUploading,
-  selectedFolderFilter,
-  setSelectedFolderFilter,
   user,
   syncStatus,
   onOpenAccountModal,
+  onOpenAppearanceModal,
   onToggleAudio,
   onCreateFolder,
   onDeleteFolder,
@@ -126,6 +161,12 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   onCreateNote,
   onUpdateNote,
   onDeleteNote,
+  onOpenNoteLocation,
+  diagnosticData,
+  onToggleDiagnostic,
+  onRecordDiagnosticSample,
+  onOpenDiagnosticModal,
+  onStartDiagnosticInViewer,
   onUpdateSettings,
   onUpdatePlanState,
   onToggleStepCompleted,
@@ -134,37 +175,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   onDeleteTask,
   onNotify,
 }) => {
-  const { startRouteStep } = useTimer();
-
-  const orderedSelectedDocs = useMemo(() => {
-    const selectedSet = new Set(planState.selectedDocIds);
-    const orderMap = new Map(planState.orderedDocIds.map((id, i) => [id, i]));
-    return documents
-      .filter((d) => selectedSet.has(d.id))
-      .sort((a, b) => {
-        const idxA = orderMap.has(a.id) ? orderMap.get(a.id)! : Number.MAX_SAFE_INTEGER;
-        const idxB = orderMap.has(b.id) ? orderMap.get(b.id)! : Number.MAX_SAFE_INTEGER;
-        return idxA - idxB;
-      });
-  }, [documents, planState.selectedDocIds, planState.orderedDocIds]);
-
-  const planResult = useMemo(
-    () =>
-      generateStudyRoute({
-        documents: orderedSelectedDocs,
-        folders,
-        settings: studySettings,
-        deadline: planState.deadline,
-        completedStepIds: planState.completedStepIds,
-      }),
-    [
-      orderedSelectedDocs,
-      folders,
-      studySettings,
-      planState.deadline,
-      planState.completedStepIds,
-    ]
-  );
+  const { startRouteStep, activeRouteStep } = useTimer();
 
   const activeDoc = useMemo(
     () => documents.find((d) => d.id === activeDocId) || null,
@@ -173,13 +184,15 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
 
   const handleStartRouteStepInViewer = useCallback(
     async (step: RouteStep, nextStep: RouteStep | null) => {
-      if (step.docId) {
-        await onOpenDocument(step.docId, step.startPage || 1);
+      const targetDocId = step.segments?.[0]?.docId || step.docId;
+      const targetStartPage = step.segments?.[0]?.startPage || step.startPage || 1;
+      if (targetDocId) {
+        await onOpenDocument(targetDocId, targetStartPage);
         setCurrentModule('docs');
       }
       startRouteStep(step, nextStep);
       onNotify(
-        `Iniciando bloque: ${step.docName} (Págs. ${step.startPage}–${step.endPage})`,
+        `Iniciando bloque: ${step.docName} (Págs. ${targetStartPage}–${step.endPage || targetStartPage})`,
         'info'
       );
     },
@@ -204,6 +217,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
         user={user}
         syncStatus={syncStatus}
         onOpenAccountModal={onOpenAccountModal}
+        onOpenAppearanceModal={onOpenAppearanceModal}
       />
 
       <main className="flex-1 overflow-hidden relative">
@@ -213,16 +227,22 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
               folders={folders}
               documents={documents}
               activeDocId={activeDocId}
-              selectedFolderFilter={selectedFolderFilter}
+              speedMinPerPage={studySettings.speedMinPerPage}
               isUploading={isUploading}
               syncStatusLabel={syncStatusLabel}
-              onSelectFolderFilter={setSelectedFolderFilter}
+              planResult={planResult}
+              activeRouteStepId={activeRouteStep?.id || null}
               onCreateFolder={onCreateFolder}
               onDeleteFolder={onDeleteFolder}
               onUploadFiles={onUploadFiles}
               onOpenDocument={(id) => void onOpenDocument(id)}
               onMoveDocumentToFolder={onMoveDocumentToFolder}
               onDeleteDocument={onDeleteDocument}
+              onStartRouteStep={(step, next) =>
+                void handleStartRouteStepInViewer(step, next)
+              }
+              onToggleStepCompleted={onToggleStepCompleted}
+              onOpenPlannerTab={() => setCurrentModule('pomodoro')}
             />
 
             <DocumentViewer
@@ -231,7 +251,17 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
               isLoadingBuffer={isLoadingBuffer}
               notes={notes}
               studySettings={studySettings}
+              planResult={planResult}
+              diagnosticData={diagnosticData}
+              highlightedNoteId={highlightedNoteId}
               onChangePage={(docId, p) => void onChangePage(docId, p)}
+              onOpenDocumentAtPage={(docId, p) => void onOpenDocument(docId, p)}
+              onStartRouteStep={(step, next) =>
+                void handleStartRouteStepInViewer(step, next)
+              }
+              onToggleDiagnostic={onToggleDiagnostic}
+              onRecordDiagnosticSample={onRecordDiagnosticSample}
+              onOpenDiagnosticModal={onOpenDiagnosticModal}
               onCreateNote={onCreateNote}
               onUpdateNote={onUpdateNote}
               onDeleteNote={onDeleteNote}
@@ -248,6 +278,9 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
             settings={studySettings}
             planState={planState}
             planResult={planResult}
+            diagnosticData={diagnosticData}
+            onStartDiagnosticInViewer={onStartDiagnosticInViewer}
+            onOpenDiagnosticModal={onOpenDiagnosticModal}
             onUpdateSettings={onUpdateSettings}
             onUpdatePlanState={onUpdatePlanState}
             onStartRouteStepInViewer={(step, next) =>
@@ -269,6 +302,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
             onCreateNote={onCreateNote}
             onUpdateNote={onUpdateNote}
             onDeleteNote={onDeleteNote}
+            onOpenNoteLocation={onOpenNoteLocation}
             onNotify={onNotify}
           />
         )}
@@ -295,17 +329,28 @@ export const App: React.FC = () => {
 
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [activeBuffer, setActiveBuffer] = useState<ArrayBuffer | null>(null);
+  const [highlightedNoteId, setHighlightedNoteId] = useState<string | null>(null);
   const [isLoadingBuffer, setIsLoadingBuffer] = useState<boolean>(false);
   const [isUploading, setIsUploading] = useState<boolean>(false);
-  const [selectedFolderFilter, setSelectedFolderFilter] = useState<string>('all');
 
   const [user, setUser] = useState<UserProfile | null>(null);
   const [syncStatus, setSyncStatus] = useState<'local' | 'synced' | 'syncing' | 'error'>(
     'local'
   );
   const [accountModalOpen, setAccountModalOpen] = useState<boolean>(false);
+  const [diagnosticModalOpen, setDiagnosticModalOpen] = useState<boolean>(false);
+  const [appearanceModalOpen, setAppearanceModalOpen] = useState<boolean>(false);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const resolvedAppearance = useMemo(
+    () => resolveAppearance(studySettings.appearance),
+    [studySettings.appearance]
+  );
+
+  useEffect(() => {
+    applyAppearanceToDocument(resolvedAppearance);
+  }, [resolvedAppearance]);
 
   const userRef = useRef<UserProfile | null>(null);
   userRef.current = user;
@@ -327,7 +372,10 @@ export const App: React.FC = () => {
     setDocuments(snap.documents);
     setNotes(snap.notes);
     setTasks(snap.tasks);
-    setStudySettings(snap.studySettings);
+    setStudySettings({
+      ...snap.studySettings,
+      appearance: resolveAppearance(snap.studySettings.appearance),
+    });
 
     if (snap.planState) {
       setPlanState(snap.planState);
@@ -359,7 +407,11 @@ export const App: React.FC = () => {
         setDocuments(cloud.documents);
         setNotes(cloud.notes);
         setTasks(cloud.tasks);
-        setStudySettings(cloud.studySettings);
+        const resolvedCloudSettings: StudySettings = {
+          ...cloud.studySettings,
+          appearance: resolveAppearance(cloud.studySettings.appearance),
+        };
+        setStudySettings(resolvedCloudSettings);
 
         const docIds = cloud.documents.map((d) => d.id);
         const resolvedPlan = cloud.planState || {
@@ -376,7 +428,7 @@ export const App: React.FC = () => {
           ...cloud.documents.map((d) => dbPut('documents', d)),
           ...cloud.notes.map((n) => dbPut('notes', n)),
           ...cloud.tasks.map((t) => dbPut('tasks', t)),
-          setSetting('studySettings', cloud.studySettings),
+          setSetting('studySettings', resolvedCloudSettings),
           setSetting('planState', resolvedPlan),
         ]);
 
@@ -454,30 +506,47 @@ export const App: React.FC = () => {
 
   const handleOpenDocument = useCallback(
     async (docId: string, pageOverride?: number) => {
+      const sameDocAlreadyLoaded = docId === activeDocId && Boolean(activeBuffer);
       setActiveDocId(docId);
-      setIsLoadingBuffer(true);
+      if (!sameDocAlreadyLoaded) {
+        setIsLoadingBuffer(true);
+      }
+
       try {
         const stored = await dbGet<DocumentRecord>('documents', docId);
         const meta = documents.find((d) => d.id === docId) || stored;
 
-        if (pageOverride && meta && meta.currentPage !== pageOverride) {
-          const updated: DocumentRecord = { ...meta, currentPage: pageOverride };
-          setDocuments((prev) => prev.map((d) => (d.id === docId ? updated : d)));
-          await dbPut('documents', updated);
-          void runCloudMutation((uid) => cloudUpsertDocument(uid, updated));
+        if (pageOverride && meta) {
+          const clampedPage = Math.min(
+            Math.max(1, pageOverride),
+            Math.max(1, meta.pageCount)
+          );
+          if (meta.currentPage !== clampedPage) {
+            const updated: DocumentRecord = {
+              ...(stored || meta),
+              currentPage: clampedPage,
+            };
+            setDocuments((prev) =>
+              prev.map((d) => (d.id === docId ? { ...d, currentPage: clampedPage } : d))
+            );
+            await dbPut('documents', updated);
+            void runCloudMutation((uid) => cloudUpsertDocument(uid, updated));
+          }
         }
 
-        if (stored?.data) {
-          setActiveBuffer(stored.data);
-        } else if (meta?.storagePath && userRef.current) {
-          const downloaded = await downloadDocumentBinaryFromCloud(meta);
-          setActiveBuffer(downloaded);
-        } else {
-          setActiveBuffer(null);
-          notify(
-            'El archivo binario no está en caché local en este dispositivo',
-            'warning'
-          );
+        if (!sameDocAlreadyLoaded) {
+          if (stored?.data) {
+            setActiveBuffer(stored.data);
+          } else if (meta?.storagePath && userRef.current) {
+            const downloaded = await downloadDocumentBinaryFromCloud(meta);
+            setActiveBuffer(downloaded);
+          } else {
+            setActiveBuffer(null);
+            notify(
+              'El archivo binario no está en caché local en este dispositivo',
+              'warning'
+            );
+          }
         }
       } catch (err) {
         console.error(err);
@@ -486,7 +555,23 @@ export const App: React.FC = () => {
         setIsLoadingBuffer(false);
       }
     },
-    [documents, notify, runCloudMutation]
+    [activeDocId, activeBuffer, documents, notify, runCloudMutation]
+  );
+
+  const highlightTimerRef = useRef<number | null>(null);
+  const handleOpenNoteLocation = useCallback(
+    async (docId: string, page: number, noteId: string) => {
+      await handleOpenDocument(docId, page);
+      setCurrentModule('docs');
+      setHighlightedNoteId(noteId);
+      if (highlightTimerRef.current) {
+        window.clearTimeout(highlightTimerRef.current);
+      }
+      highlightTimerRef.current = window.setTimeout(() => {
+        setHighlightedNoteId(null);
+      }, 2600);
+    },
+    [handleOpenDocument]
   );
 
   const handleChangePage = useCallback(
@@ -515,12 +600,9 @@ export const App: React.FC = () => {
   );
 
   const handleUploadFiles = useCallback(
-    async (files: FileList) => {
+    async (files: FileList, explicitFolderId: string | null = null) => {
       setIsUploading(true);
-      const targetFolderId =
-        selectedFolderFilter !== 'all' && selectedFolderFilter !== 'unassigned'
-          ? selectedFolderFilter
-          : null;
+      const targetFolderId = explicitFolderId ?? null;
 
       let lastCreatedId: string | null = null;
       let lastBuffer: ArrayBuffer | null = null;
@@ -600,7 +682,7 @@ export const App: React.FC = () => {
 
       setIsUploading(false);
     },
-    [selectedFolderFilter, notify, runCloudMutation]
+    [notify, runCloudMutation]
   );
 
   const handleCreateFolder = useCallback(
@@ -613,7 +695,6 @@ export const App: React.FC = () => {
       };
       await dbPut('folders', folder);
       setFolders((prev) => [...prev, folder]);
-      setSelectedFolderFilter(folder.id);
       void runCloudMutation((uid) => cloudUpsertFolder(uid, folder));
       notify(`Carpeta "${name}" creada`, 'success');
     },
@@ -630,9 +711,6 @@ export const App: React.FC = () => {
         onConfirm: async () => {
           await dbDelete('folders', folder.id);
           setFolders((prev) => prev.filter((f) => f.id !== folder.id));
-          if (selectedFolderFilter === folder.id) {
-            setSelectedFolderFilter('all');
-          }
 
           const affected = documents.filter((d) => d.folderId === folder.id);
           for (const doc of affected) {
@@ -650,7 +728,7 @@ export const App: React.FC = () => {
         },
       });
     },
-    [documents, selectedFolderFilter, notify, runCloudMutation]
+    [documents, notify, runCloudMutation]
   );
 
   const handleMoveDocumentToFolder = useCallback(
@@ -692,6 +770,14 @@ export const App: React.FC = () => {
               ...prev,
               selectedDocIds: prev.selectedDocIds.filter((id) => id !== doc.id),
               orderedDocIds: prev.orderedDocIds.filter((id) => id !== doc.id),
+              diagnostic: prev.diagnostic
+                ? {
+                  ...prev.diagnostic,
+                  samples: prev.diagnostic.samples.filter(
+                    (s) => s.docId !== doc.id
+                  ),
+                }
+                : undefined,
             };
             void setSetting('planState', updated);
             void runCloudMutation((uid) => cloudSavePlanState(uid, updated));
@@ -774,6 +860,24 @@ export const App: React.FC = () => {
       next.audioEnabled ? 'Alertas sonoras activadas' : 'Alertas sonoras silenciadas',
       'info'
     );
+  }, [studySettings, handleUpdateSettings, notify]);
+
+  const handleChangeAppearance = useCallback(
+    (nextAppearance: AppearanceSettings) => {
+      void handleUpdateSettings({
+        ...studySettings,
+        appearance: resolveAppearance(nextAppearance),
+      });
+    },
+    [studySettings, handleUpdateSettings]
+  );
+
+  const handleResetAppearance = useCallback(() => {
+    void handleUpdateSettings({
+      ...studySettings,
+      appearance: DEFAULT_APPEARANCE,
+    });
+    notify('Apariencia restablecida a valores predeterminados', 'info');
   }, [studySettings, handleUpdateSettings, notify]);
 
   const handleUpdatePlanState = useCallback(
@@ -953,7 +1057,11 @@ export const App: React.FC = () => {
         setTasks(parsed.tasks);
       }
       if (parsed.studySettings) {
-        const merged = { ...DEFAULT_STUDY_SETTINGS, ...parsed.studySettings };
+        const merged: StudySettings = {
+          ...DEFAULT_STUDY_SETTINGS,
+          ...parsed.studySettings,
+          appearance: resolveAppearance(parsed.studySettings.appearance),
+        };
         await setSetting('studySettings', merged);
         setStudySettings(merged);
       }
@@ -967,11 +1075,203 @@ export const App: React.FC = () => {
     }
   };
 
+  const orderedSelectedDocs = useMemo(() => {
+    const selectedSet = new Set(planState.selectedDocIds);
+    const orderMap = new Map(planState.orderedDocIds.map((id, i) => [id, i]));
+    return documents
+      .filter((d) => selectedSet.has(d.id))
+      .sort((a, b) => {
+        const idxA = orderMap.has(a.id) ? orderMap.get(a.id)! : Number.MAX_SAFE_INTEGER;
+        const idxB = orderMap.has(b.id) ? orderMap.get(b.id)! : Number.MAX_SAFE_INTEGER;
+        return idxA - idxB;
+      });
+  }, [documents, planState.selectedDocIds, planState.orderedDocIds]);
+
+  const planResult = useMemo(
+    () =>
+      generateStudyRoute({
+        documents: orderedSelectedDocs,
+        folders,
+        settings: studySettings,
+        deadline: planState.deadline,
+        completedStepIds: planState.completedStepIds,
+      }),
+    [
+      orderedSelectedDocs,
+      folders,
+      studySettings,
+      planState.deadline,
+      planState.completedStepIds,
+    ]
+  );
+
+  const handleStepReopenedAndAdapted = useCallback(
+    (step: RouteStep | null, extraMinutes: number) => {
+      if (step) {
+        setPlanState((prev) => {
+          if (!prev.completedStepIds.includes(step.id)) return prev;
+          const updated: PersistedPlanState = {
+            ...prev,
+            completedStepIds: prev.completedStepIds.filter((id) => id !== step.id),
+          };
+          void setSetting('planState', updated);
+          void runCloudMutation((uid) => cloudSavePlanState(uid, updated));
+          return updated;
+        });
+      }
+
+      // Adaptar velocidad estimada de lectura segun tiempo extra consumido
+      const currentSpeed = studySettings.speedMinPerPage || 3;
+      let nextSpeed = Number((currentSpeed + 0.5).toFixed(1));
+      if (step && step.pageCount && step.pageCount > 0) {
+        const observedSpeed = (step.durationMinutes + extraMinutes) / step.pageCount;
+        nextSpeed = Number(Math.max(currentSpeed + 0.3, observedSpeed).toFixed(1));
+      }
+      nextSpeed = Math.min(60, Math.max(0.5, nextSpeed));
+
+      const nextSettings: StudySettings = {
+        ...studySettings,
+        speedMinPerPage: nextSpeed,
+      };
+      void handleUpdateSettings(nextSettings);
+      notify(
+        `Descanso aplazado +${extraMinutes} min · Plan adaptado a ${nextSpeed} min/pág`,
+        'info'
+      );
+    },
+    [studySettings, handleUpdateSettings, notify, runCloudMutation]
+  );
+
+  const handleRequestOpenSegment = useCallback(
+    (segment: RouteSegment) => {
+      void handleOpenDocument(segment.docId, segment.startPage);
+    },
+    [handleOpenDocument]
+  );
+
+  const diagnosticData: DiagnosticData = planState.diagnostic || DEFAULT_DIAGNOSTIC_DATA;
+
+  const updateDiagnosticData = useCallback(
+    (updater: (prev: DiagnosticData) => DiagnosticData) => {
+      setPlanState((prev) => {
+        const currentDiag = prev.diagnostic || DEFAULT_DIAGNOSTIC_DATA;
+        const updated: PersistedPlanState = {
+          ...prev,
+          diagnostic: updater(currentDiag),
+        };
+        void setSetting('planState', updated);
+        void runCloudMutation((uid) => cloudSavePlanState(uid, updated));
+        return updated;
+      });
+    },
+    [runCloudMutation]
+  );
+
+  const handleToggleDiagnostic = useCallback(
+    (active: boolean) => {
+      updateDiagnosticData((prev) => ({ ...prev, isActive: active }));
+      notify(
+        active
+          ? 'Modo Diagnóstico activo: lee algunas páginas para medir tu ritmo real'
+          : 'Medición de diagnóstico pausada',
+        active ? 'success' : 'info'
+      );
+    },
+    [updateDiagnosticData, notify]
+  );
+
+  const handleRecordDiagnosticSample = useCallback(
+    (sample: {
+      docId: string;
+      docName: string;
+      fileType: DocumentType;
+      page: number;
+      addedSeconds: number;
+    }) => {
+      updateDiagnosticData((prev) => ({
+        ...prev,
+        samples: mergeReadingSample(prev.samples, sample),
+      }));
+    },
+    [updateDiagnosticData]
+  );
+
+  const handleChangeDiagnosticCriterion = useCallback(
+    (criterion: DiagnosticCriterion) => {
+      updateDiagnosticData((prev) => ({ ...prev, criterion }));
+    },
+    [updateDiagnosticData]
+  );
+
+  const handleRemoveDiagnosticSample = useCallback(
+    (docId: string, page: number) => {
+      updateDiagnosticData((prev) => ({
+        ...prev,
+        samples: prev.samples.filter(
+          (s) => !(s.docId === docId && s.page === page)
+        ),
+      }));
+    },
+    [updateDiagnosticData]
+  );
+
+  const handleResetDiagnosticSamples = useCallback(() => {
+    updateDiagnosticData((prev) => ({ ...prev, samples: [] }));
+    notify('Muestras de diagnóstico reiniciadas', 'info');
+  }, [updateDiagnosticData, notify]);
+
+  const handleStartDiagnosticInViewer = useCallback(() => {
+    updateDiagnosticData((prev) => ({ ...prev, isActive: true }));
+    setCurrentModule('docs');
+    if (!activeDocId && documents.length > 0) {
+      void handleOpenDocument(documents[0].id);
+    }
+    notify(
+      'Modo Diagnóstico activado: lee 3–5 páginas en el visor y revisa tu perfil recomendado',
+      'success'
+    );
+  }, [updateDiagnosticData, activeDocId, documents, handleOpenDocument, notify]);
+
+  const handleApplyDiagnosticProfile = useCallback(
+    (rec: DiagnosticRecommendation) => {
+      const nextSettings: StudySettings = {
+        ...studySettings,
+        presetId: 'custom',
+        studyMinutes: rec.recommendedSettings.studyMinutes,
+        shortBreakMinutes: rec.recommendedSettings.shortBreakMinutes,
+        longBreakMinutes: rec.recommendedSettings.longBreakMinutes,
+        longBreakEveryNBlocks: rec.recommendedSettings.longBreakEveryNBlocks,
+        speedMinPerPage: rec.recommendedSettings.speedMinPerPage,
+        pagesPerBlock: rec.recommendedSettings.pagesPerBlock,
+      };
+      void handleUpdateSettings(nextSettings);
+      updateDiagnosticData((prev) => ({
+        ...prev,
+        isActive: false,
+        lastAppliedAt: new Date().toISOString(),
+      }));
+      setDiagnosticModalOpen(false);
+      notify(
+        `Perfil calibrado aplicado: ${rec.recommendedSettings.studyMinutes}/${rec.recommendedSettings.shortBreakMinutes}/${rec.recommendedSettings.longBreakMinutes} min @ ${rec.recommendedSettings.speedMinPerPage} min/pág`,
+        'success'
+      );
+    },
+    [studySettings, handleUpdateSettings, updateDiagnosticData, notify]
+  );
+
+  const activeDoc = useMemo(
+    () => documents.find((d) => d.id === activeDocId) || null,
+    [documents, activeDocId]
+  );
+
   return (
     <TimerProvider
       settings={studySettings}
+      plannedSteps={planResult.steps}
       onNotify={notify}
       onStepCompleted={handleTimerRouteStepCompleted}
+      onStepReopenedAndAdapted={handleStepReopenedAndAdapted}
+      onRequestOpenSegment={handleRequestOpenSegment}
     >
       <WorkspaceShell
         currentModule={currentModule}
@@ -982,15 +1282,16 @@ export const App: React.FC = () => {
         tasks={tasks}
         studySettings={studySettings}
         planState={planState}
+        planResult={planResult}
         activeDocId={activeDocId}
         activeBuffer={activeBuffer}
+        highlightedNoteId={highlightedNoteId}
         isLoadingBuffer={isLoadingBuffer}
         isUploading={isUploading}
-        selectedFolderFilter={selectedFolderFilter}
-        setSelectedFolderFilter={setSelectedFolderFilter}
         user={user}
         syncStatus={syncStatus}
         onOpenAccountModal={() => setAccountModalOpen(true)}
+        onOpenAppearanceModal={() => setAppearanceModalOpen(true)}
         onToggleAudio={handleToggleAudio}
         onCreateFolder={handleCreateFolder}
         onDeleteFolder={handleDeleteFolder}
@@ -1002,6 +1303,14 @@ export const App: React.FC = () => {
         onCreateNote={handleCreateNote}
         onUpdateNote={handleUpdateNote}
         onDeleteNote={handleDeleteNote}
+        onOpenNoteLocation={(docId, page, noteId) =>
+          void handleOpenNoteLocation(docId, page, noteId)
+        }
+        diagnosticData={diagnosticData}
+        onToggleDiagnostic={handleToggleDiagnostic}
+        onRecordDiagnosticSample={handleRecordDiagnosticSample}
+        onOpenDiagnosticModal={() => setDiagnosticModalOpen(true)}
+        onStartDiagnosticInViewer={handleStartDiagnosticInViewer}
         onUpdateSettings={handleUpdateSettings}
         onUpdatePlanState={handleUpdatePlanState}
         onToggleStepCompleted={handleToggleStepCompleted}
@@ -1038,6 +1347,28 @@ export const App: React.FC = () => {
         }
         onExportBackup={handleExportBackup}
         onImportBackup={handleImportBackup}
+      />
+
+      <DiagnosticModal
+        open={diagnosticModalOpen}
+        isActive={diagnosticData.isActive}
+        activeDoc={activeDoc}
+        samples={diagnosticData.samples}
+        criterion={diagnosticData.criterion}
+        onClose={() => setDiagnosticModalOpen(false)}
+        onToggleDiagnostic={handleToggleDiagnostic}
+        onChangeCriterion={handleChangeDiagnosticCriterion}
+        onRemoveSample={handleRemoveDiagnosticSample}
+        onResetSamples={handleResetDiagnosticSamples}
+        onApplyRecommendation={handleApplyDiagnosticProfile}
+      />
+
+      <AppearanceModal
+        open={appearanceModalOpen}
+        appearance={resolvedAppearance}
+        onChange={handleChangeAppearance}
+        onReset={handleResetAppearance}
+        onClose={() => setAppearanceModalOpen(false)}
       />
 
       <ToastContainer toasts={toasts} />

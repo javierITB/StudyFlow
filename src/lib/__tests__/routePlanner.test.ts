@@ -32,10 +32,91 @@ const SAMPLE_DOCS: DocumentRecord[] = [
 ];
 
 describe('StudyFlow routePlanner', () => {
-  it('genera descansos cortos dentro del mismo archivo y descanso largo entre documentos', () => {
+  it('empaqueta archivos cortos en un mismo bloque Pomodoro y pone descanso largo al terminar', () => {
+    const shortDocs: DocumentRecord[] = [
+      { ...SAMPLE_DOCS[0], id: 'shortA', name: 'LecturaA.pdf', pageCount: 2 }, // 6 min
+      { ...SAMPLE_DOCS[1], id: 'shortB', name: 'LecturaB.pptx', pageCount: 4 }, // 12 min
+      { ...SAMPLE_DOCS[0], id: 'shortC', name: 'LecturaC.pdf', pageCount: 10 }, // 30 min (toma 7m en bloque 1 y resto en bloque 2)
+    ];
+
+    const settings: StudySettings = {
+      ...DEFAULT_STUDY_SETTINGS,
+      intervalMode: 'time',
+      blockAllocationMode: 'pack',
+      studyMinutes: 25,
+      shortBreakMinutes: 5,
+      longBreakMinutes: 15,
+      longBreakBetweenDocs: true,
+      speedMinPerPage: 3,
+    };
+
+    const result = generateStudyRoute({
+      documents: shortDocs,
+      folders: SAMPLE_FOLDERS,
+      settings,
+      deadline: '2026-11-14T20:00:00Z',
+      now: new Date('2026-11-11T10:00:00Z'),
+    });
+
+    const studySteps = result.steps.filter((s) => s.type === 'study');
+    expect(studySteps.length).toBe(2);
+
+    // Bloque 1 empaqueta LecturaA (2 pags = 6m) + LecturaB (4 pags = 12m) + 2 pags de LecturaC (6m) = 24m
+    expect(studySteps[0].segments?.map((s) => `${s.docId}:${s.startPage}-${s.endPage}`)).toEqual([
+      'shortA:1-2',
+      'shortB:1-4',
+      'shortC:1-2',
+    ]);
+    expect(studySteps[0].durationMinutes).toBe(24);
+
+    // Como el Bloque 1 completo archivos antes de pasar al Bloque 2, sigue un descanso largo de 15m
+    expect(result.steps[1].type).toBe('long_break');
+    expect(result.steps[1].durationMinutes).toBe(15);
+
+    // Bloque 2 termina las paginas restantes de LecturaC (pags 3-10 -> 24 min)
+    expect(studySteps[1].segments?.map((s) => `${s.docId}:${s.startPage}-${s.endPage}`)).toEqual([
+      'shortC:3-10',
+    ]);
+    expect(studySteps[1].durationMinutes).toBe(24);
+  });
+
+  it('en modo exact_doc ajusta la duracion al tiempo real de cada archivo', () => {
+    const shortDocs: DocumentRecord[] = [
+      { ...SAMPLE_DOCS[0], id: 'shortA', name: 'LecturaA.pdf', pageCount: 2 }, // 6 min
+      { ...SAMPLE_DOCS[1], id: 'shortB', name: 'LecturaB.pptx', pageCount: 4 }, // 12 min
+    ];
+
+    const settings: StudySettings = {
+      ...DEFAULT_STUDY_SETTINGS,
+      intervalMode: 'time',
+      blockAllocationMode: 'exact_doc',
+      studyMinutes: 25,
+      shortBreakMinutes: 5,
+      longBreakMinutes: 15,
+      longBreakBetweenDocs: true,
+      speedMinPerPage: 3,
+    };
+
+    const result = generateStudyRoute({
+      documents: shortDocs,
+      folders: SAMPLE_FOLDERS,
+      settings,
+      deadline: '2026-11-14T20:00:00Z',
+      now: new Date('2026-11-11T10:00:00Z'),
+    });
+
+    expect(result.steps.map((s) => `${s.type}:${s.durationMinutes}`)).toEqual([
+      'study:6',
+      'long_break:15',
+      'study:12',
+    ]);
+  });
+
+  it('genera descansos cortos dentro del mismo archivo y descanso largo entre documentos en modo por paginas', () => {
     const settings: StudySettings = {
       ...DEFAULT_STUDY_SETTINGS,
       intervalMode: 'pages',
+      blockAllocationMode: 'exact_doc',
       pagesPerBlock: 5,
       shortBreakMinutes: 5,
       longBreakMinutes: 20,
@@ -43,18 +124,14 @@ describe('StudyFlow routePlanner', () => {
       speedMinPerPage: 2,
     };
 
-    const now = new Date('2026-11-11T10:00:00Z');
-    const deadline = '2026-11-14T20:00:00Z';
-
     const result = generateStudyRoute({
       documents: SAMPLE_DOCS,
       folders: SAMPLE_FOLDERS,
       settings,
-      deadline,
-      now,
+      deadline: '2026-11-14T20:00:00Z',
+      now: new Date('2026-11-11T10:00:00Z'),
     });
 
-    // Doc1 (12 pags -> 1-5, 6-10, 11-12) = 3 bloques; Doc2 (8 pags -> 1-5, 6-8) = 2 bloques
     expect(result.totalStudyBlocks).toBe(5);
     expect(result.totalPages).toBe(20);
     expect(result.feasibility).toBe('optimal');
@@ -68,8 +145,6 @@ describe('StudyFlow routePlanner', () => {
       'doc2:6-8',
     ]);
 
-    // Verificar secuencia exacta de descansos:
-    // doc1 block0 -> short -> doc1 block1 -> short -> doc1 block2 -> LONG (cambio a doc2) -> doc2 block0 -> short -> doc2 block1
     expect(result.steps.map((s) => s.type)).toEqual([
       'study',
       'short_break',
@@ -91,6 +166,7 @@ describe('StudyFlow routePlanner', () => {
     const deep = applyPresetToSettings(DEFAULT_STUDY_SETTINGS, 'deep');
     const settings: StudySettings = {
       ...deep,
+      blockAllocationMode: 'exact_doc',
       speedMinPerPage: 3,
       resumeFromCurrentPage: true,
     };
@@ -128,11 +204,10 @@ describe('StudyFlow routePlanner', () => {
     const overloaded = generateStudyRoute({
       documents: [{ ...SAMPLE_DOCS[0], pageCount: 200 }],
       folders: SAMPLE_FOLDERS,
-      settings: { ...DEFAULT_STUDY_SETTINGS, speedMinPerPage: 3 }, // 600 min = 10h + breaks
-      deadline: '2026-11-11T14:00:00Z', // solo 4 horas
+      settings: { ...DEFAULT_STUDY_SETTINGS, speedMinPerPage: 3 },
+      deadline: '2026-11-11T14:00:00Z',
       now,
     });
     expect(overloaded.feasibility).toBe('critical');
   });
 });
-

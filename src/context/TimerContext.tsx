@@ -7,10 +7,18 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { RouteStep, StudySettings } from '../types/studyflow';
+import { RouteSegment, RouteStep, StudySettings } from '../types/studyflow';
 import { playStudyTone } from '../lib/audio';
 
 export type TimerMode = 'study' | 'short' | 'long';
+
+export interface TransitionPromptState {
+  kind: 'segment_early' | 'block_early';
+  unusedSeconds: number;
+  nextSegment?: RouteSegment | null;
+  recommendedBreakType: 'short' | 'long';
+  recommendedBreakMinutes: number;
+}
 
 interface ActiveRouteContext {
   step: RouteStep;
@@ -27,28 +35,53 @@ interface TimerContextValue {
   totalPlannedBlocks: number;
   activeRouteStep: RouteStep | null;
   activeNextStep: RouteStep | null;
+  activeSegmentIndex: number;
+  canExtendStudyFromBreak: boolean;
+  transitionPrompt: TransitionPromptState | null;
   setMode: (mode: TimerMode, customMinutes?: number) => void;
   toggleTimer: () => void;
   resetTimer: () => void;
   skipCycle: () => void;
   setTotalPlannedBlocks: (count: number) => void;
-  startRouteStep: (step: RouteStep, nextStep?: RouteStep | null) => void;
+  startRouteStep: (
+    step: RouteStep,
+    nextStep?: RouteStep | null,
+    segmentIndex?: number
+  ) => void;
+  setActiveSegmentIndex: (index: number) => void;
   completeCurrentBlock: () => void;
+  completeCurrentSegment: () => void;
+  chooseContinueNextSegment: () => RouteSegment | null;
+  chooseStartBreak: (includeUnusedSeconds: boolean) => void;
+  chooseSkipBreakToNextBlock: () => void;
+  dismissTransitionPrompt: () => void;
+  adjustTimerSeconds: (deltaSeconds: number) => void;
+  extendStudyAndAdaptPlan: (extraMinutes?: number) => void;
+  skipBreakAndContinue: () => void;
 }
 
 const TimerContext = createContext<TimerContextValue | null>(null);
 
 interface TimerProviderProps {
   settings: StudySettings;
+  plannedSteps?: RouteStep[];
   onNotify: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
   onStepCompleted?: (stepId: string, docId: string | null, endPage?: number) => void;
+  onStepReopenedAndAdapted?: (
+    step: RouteStep | null,
+    extraMinutes: number
+  ) => void;
+  onRequestOpenSegment?: (segment: RouteSegment) => void;
   children: React.ReactNode;
 }
 
 export const TimerProvider: React.FC<TimerProviderProps> = ({
   settings,
+  plannedSteps = [],
   onNotify,
   onStepCompleted,
+  onStepReopenedAndAdapted,
+  onRequestOpenSegment,
   children,
 }) => {
   const [mode, setModeState] = useState<TimerMode>('study');
@@ -63,6 +96,15 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
   const [cyclesCompleted, setCyclesCompleted] = useState<number>(0);
   const [totalPlannedBlocks, setTotalPlannedBlocks] = useState<number>(0);
   const [activeRoute, setActiveRoute] = useState<ActiveRouteContext | null>(null);
+  const [activeSegmentIndex, setActiveSegmentIndex] = useState<number>(0);
+  const [canExtendStudyFromBreak, setCanExtendStudyFromBreak] = useState<boolean>(false);
+  const [transitionPrompt, setTransitionPrompt] = useState<TransitionPromptState | null>(
+    null
+  );
+  const [lastCompletedStudyStep, setLastCompletedStudyStep] = useState<RouteStep | null>(
+    null
+  );
+  const [accumulatedExtraMinutes, setAccumulatedExtraMinutes] = useState<number>(0);
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -76,23 +118,59 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
   const cyclesRef = useRef(cyclesCompleted);
   cyclesRef.current = cyclesCompleted;
 
+  const remainingRef = useRef(remainingSeconds);
+  remainingRef.current = remainingSeconds;
+
+  const plannedStepsRef = useRef(plannedSteps);
+  plannedStepsRef.current = plannedSteps;
+
   const onStepCompletedRef = useRef(onStepCompleted);
   onStepCompletedRef.current = onStepCompleted;
+
+  const onStepReopenedRef = useRef(onStepReopenedAndAdapted);
+  onStepReopenedRef.current = onStepReopenedAndAdapted;
+
+  const onRequestOpenSegmentRef = useRef(onRequestOpenSegment);
+  onRequestOpenSegmentRef.current = onRequestOpenSegment;
 
   const onNotifyRef = useRef(onNotify);
   onNotifyRef.current = onNotify;
 
   const getDurationForMode = useCallback((targetMode: TimerMode, customMin?: number) => {
     const s = settingsRef.current;
-    if (customMin && customMin > 0) return customMin * 60;
+    if (customMin && customMin > 0) return Math.round(customMin * 60);
     if (targetMode === 'study') return Math.max(60, s.studyMinutes * 60);
     if (targetMode === 'short') return Math.max(60, s.shortBreakMinutes * 60);
     return Math.max(60, s.longBreakMinutes * 60);
   }, []);
 
+  const resolveBreakPlan = useCallback((nextCycleCount: number) => {
+    const s = settingsRef.current;
+    const routeCtx = activeRouteRef.current;
+
+    if (routeCtx?.nextStep && routeCtx.nextStep.type !== 'study') {
+      return {
+        breakMode: (routeCtx.nextStep.type === 'long_break' ? 'long' : 'short') as
+          | 'short'
+          | 'long',
+        breakMinutes: routeCtx.nextStep.durationMinutes,
+      };
+    }
+    if (s.longBreakEveryNBlocks > 0 && nextCycleCount % s.longBreakEveryNBlocks === 0) {
+      return {
+        breakMode: 'long' as const,
+        breakMinutes: s.longBreakMinutes,
+      };
+    }
+    return {
+      breakMode: 'short' as const,
+      breakMinutes: s.shortBreakMinutes,
+    };
+  }, []);
+
   // Sincronizar duracion en reposo cuando el usuario cambia la configuracion de ciclos
   useEffect(() => {
-    if (isRunning || activeRoute) return;
+    if (isRunning || activeRoute || transitionPrompt) return;
     if (mode === 'study') {
       const dur = Math.max(60, settings.studyMinutes * 60);
       setTotalDurationSeconds(dur);
@@ -112,12 +190,15 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
     settings.longBreakMinutes,
     isRunning,
     activeRoute,
+    transitionPrompt,
     mode,
   ]);
 
   const setMode = useCallback(
     (nextMode: TimerMode, customMinutes?: number) => {
       setIsRunning(false);
+      setTransitionPrompt(null);
+      setCanExtendStudyFromBreak(false);
       setModeState(nextMode);
       const dur = getDurationForMode(nextMode, customMinutes);
       setTotalDurationSeconds(dur);
@@ -127,15 +208,37 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
     [getDurationForMode]
   );
 
-  const finishStudyBlockAndTransition = useCallback(
-    (manualPageCompletion = false) => {
+  const launchBreakTimer = useCallback(
+    (
+      breakMode: 'short' | 'long',
+      breakSeconds: number,
+      allowExtendBack: boolean,
+      completedStep: RouteStep | null
+    ) => {
+      const dur = Math.max(30, Math.round(breakSeconds));
+      setTransitionPrompt(null);
+      setLastCompletedStudyStep(completedStep);
+      setCanExtendStudyFromBreak(allowExtendBack);
+      setModeState(breakMode);
+      setTotalDurationSeconds(dur);
+      setRemainingSeconds(dur);
+      setElapsedSeconds(0);
+      setIsRunning(true);
+    },
+    []
+  );
+
+  const commitStudyCompletionAndStartBreak = useCallback(
+    (extraBreakSeconds = 0, allowExtendBack = true) => {
       const s = settingsRef.current;
       const routeCtx = activeRouteRef.current;
       const nextCycles = cyclesRef.current + 1;
       setCyclesCompleted(nextCycles);
       playStudyTone('success', s.audioEnabled);
 
+      let completedStep: RouteStep | null = null;
       if (routeCtx?.step && routeCtx.step.type === 'study') {
+        completedStep = routeCtx.step;
         onStepCompletedRef.current?.(
           routeCtx.step.id,
           routeCtx.step.docId,
@@ -143,34 +246,88 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
         );
       }
 
-      // Decidir si sigue descanso largo (cambio de documento o cada N bloques) o corto
-      let nextBreakMode: TimerMode = 'short';
-      let nextBreakMinutes = s.shortBreakMinutes;
+      const { breakMode, breakMinutes } = resolveBreakPlan(nextCycles);
+      const totalBreakSecs = breakMinutes * 60 + Math.max(0, extraBreakSeconds);
 
-      if (routeCtx?.nextStep && routeCtx.nextStep.type !== 'study') {
-        nextBreakMode = routeCtx.nextStep.type === 'long_break' ? 'long' : 'short';
-        nextBreakMinutes = routeCtx.nextStep.durationMinutes;
-      } else if (
-        s.longBreakEveryNBlocks > 0 &&
-        nextCycles % s.longBreakEveryNBlocks === 0
-      ) {
-        nextBreakMode = 'long';
-        nextBreakMinutes = s.longBreakMinutes;
+      launchBreakTimer(breakMode, totalBreakSecs, allowExtendBack, completedStep);
+
+      const totalBreakMinLabel = Math.round(totalBreakSecs / 60);
+      onNotifyRef.current(
+        `${breakMode === 'long' ? 'Descanso largo' : 'Descanso corto'} iniciado (${totalBreakMinLabel} min).`,
+        'success'
+      );
+    },
+    [resolveBreakPlan, launchBreakTimer]
+  );
+
+  const advanceToNextRouteStep = useCallback(
+    (completedStep: RouteStep | null, autoStart: boolean) => {
+      const steps = plannedStepsRef.current;
+      const s = settingsRef.current;
+      const completedIdx = completedStep
+        ? steps.findIndex((st) => st.id === completedStep.id)
+        : -1;
+
+      const searchFrom = completedIdx >= 0 ? completedIdx + 1 : 0;
+      let nextStudyIdx = steps.findIndex(
+        (st, idx) =>
+          idx >= searchFrom &&
+          st.type === 'study' &&
+          !st.completed &&
+          st.id !== completedStep?.id
+      );
+
+      if (nextStudyIdx < 0 && searchFrom > 0) {
+        nextStudyIdx = steps.findIndex(
+          (st) => st.type === 'study' && !st.completed && st.id !== completedStep?.id
+        );
       }
 
-      setIsRunning(false);
-      setModeState(nextBreakMode);
-      const dur = Math.max(60, nextBreakMinutes * 60);
+      if (nextStudyIdx >= 0) {
+        const nextStudy = steps[nextStudyIdx];
+        const afterNext =
+          nextStudyIdx + 1 < steps.length ? steps[nextStudyIdx + 1] : null;
+        setActiveRoute({ step: nextStudy, nextStep: afterNext });
+        setActiveSegmentIndex(0);
+        setAccumulatedExtraMinutes(0);
+        setCanExtendStudyFromBreak(false);
+        setTransitionPrompt(null);
+        setModeState('study');
+        const dur = Math.max(60, nextStudy.durationMinutes * 60);
+        setTotalDurationSeconds(dur);
+        setRemainingSeconds(dur);
+        setElapsedSeconds(0);
+        setIsRunning(autoStart);
+
+        const firstSeg = nextStudy.segments?.[0];
+        if (firstSeg) {
+          onRequestOpenSegmentRef.current?.(firstSeg);
+        } else if (nextStudy.docId) {
+          onRequestOpenSegmentRef.current?.({
+            docId: nextStudy.docId,
+            docName: nextStudy.docName,
+            startPage: nextStudy.startPage || 1,
+            endPage: nextStudy.endPage || 1,
+            pageCount: nextStudy.pageCount || 1,
+            estimatedMinutes: nextStudy.durationMinutes,
+          });
+        }
+        return;
+      }
+
+      setActiveRoute(null);
+      setCanExtendStudyFromBreak(false);
+      setTransitionPrompt(null);
+      setModeState('study');
+      const dur = Math.max(60, s.studyMinutes * 60);
       setTotalDurationSeconds(dur);
       setRemainingSeconds(dur);
       setElapsedSeconds(0);
+      setIsRunning(false);
 
-      onNotifyRef.current(
-        manualPageCompletion
-          ? `Bloque completado. Inicia tu ${nextBreakMode === 'long' ? 'descanso largo' : 'descanso corto'} (${nextBreakMinutes} min).`
-          : `Sesión completada. Es hora de un ${nextBreakMode === 'long' ? 'descanso largo' : 'descanso corto'}.`,
-        'success'
-      );
+      if (steps.some((st) => st.type === 'study')) {
+        onNotifyRef.current('¡Has completado todos los bloques de la ruta!', 'success');
+      }
     },
     []
   );
@@ -178,18 +335,13 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
   const handleCountdownZero = useCallback(() => {
     const s = settingsRef.current;
     if (modeRef.current === 'study') {
-      finishStudyBlockAndTransition(false);
+      commitStudyCompletionAndStartBreak(0, true);
     } else {
       playStudyTone('breakEnd', s.audioEnabled);
-      setIsRunning(false);
-      setModeState('study');
-      const dur = Math.max(60, s.studyMinutes * 60);
-      setTotalDurationSeconds(dur);
-      setRemainingSeconds(dur);
-      setElapsedSeconds(0);
-      onNotifyRef.current('Descanso finalizado. Listo para el siguiente bloque.', 'info');
+      onNotifyRef.current('Descanso finalizado. Listo para continuar.', 'info');
+      advanceToNextRouteStep(lastCompletedStudyStep, false);
     }
-  }, [finishStudyBlockAndTransition]);
+  }, [commitStudyCompletionAndStartBreak, lastCompletedStudyStep, advanceToNextRouteStep]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -226,6 +378,7 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
 
   const resetTimer = useCallback(() => {
     setIsRunning(false);
+    setTransitionPrompt(null);
     setElapsedSeconds(0);
     setRemainingSeconds(totalDurationSeconds);
     onNotifyRef.current('Temporizador reiniciado', 'info');
@@ -233,17 +386,22 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
 
   const skipCycle = useCallback(() => {
     setIsRunning(false);
+    setTransitionPrompt(null);
     if (mode === 'study') {
-      setMode('short');
+      const { breakMode, breakMinutes } = resolveBreakPlan(cyclesRef.current + 1);
+      launchBreakTimer(breakMode, breakMinutes * 60, false, activeRouteRef.current?.step ?? null);
     } else {
-      setMode('study');
+      advanceToNextRouteStep(lastCompletedStudyStep, false);
     }
-  }, [mode, setMode]);
+  }, [mode, resolveBreakPlan, launchBreakTimer, advanceToNextRouteStep, lastCompletedStudyStep]);
 
   const startRouteStep = useCallback(
-    (step: RouteStep, nextStep: RouteStep | null = null) => {
+    (step: RouteStep, nextStep: RouteStep | null = null, segmentIndex = 0) => {
       setActiveRoute({ step, nextStep });
-      setIsRunning(false);
+      setActiveSegmentIndex(segmentIndex);
+      setTransitionPrompt(null);
+      setCanExtendStudyFromBreak(false);
+      setAccumulatedExtraMinutes(0);
       setElapsedSeconds(0);
 
       if (step.type === 'study') {
@@ -265,13 +423,162 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
     []
   );
 
-  const completeCurrentBlock = useCallback(() => {
-    if (mode === 'study') {
-      finishStudyBlockAndTransition(true);
-    } else {
+  // Completar sub-archivo dentro de un bloque empaquetado (o bloque unico)
+  const completeCurrentSegment = useCallback(() => {
+    if (modeRef.current !== 'study') {
       handleCountdownZero();
+      return;
     }
-  }, [mode, finishStudyBlockAndTransition, handleCountdownZero]);
+
+    const s = settingsRef.current;
+    const routeCtx = activeRouteRef.current;
+    const segments = routeCtx?.step?.segments || [];
+    const hasNextSegment =
+      segments.length > 1 && activeSegmentIndex < segments.length - 1;
+
+    if (hasNextSegment) {
+      const nextSeg = segments[activeSegmentIndex + 1];
+      const { breakMode, breakMinutes } = resolveBreakPlan(cyclesRef.current + 1);
+      setTransitionPrompt({
+        kind: 'segment_early',
+        unusedSeconds: s.intervalMode === 'time' ? remainingRef.current : 0,
+        nextSegment: nextSeg,
+        recommendedBreakType: breakMode,
+        recommendedBreakMinutes: breakMinutes,
+      });
+      return;
+    }
+
+    // Ultimo segmento o bloque simple: si queda >= 60s en modo tiempo, preguntar que hacer con el sobrante
+    if (s.intervalMode === 'time' && remainingRef.current >= 60) {
+      const { breakMode, breakMinutes } = resolveBreakPlan(cyclesRef.current + 1);
+      setTransitionPrompt({
+        kind: 'block_early',
+        unusedSeconds: remainingRef.current,
+        nextSegment: null,
+        recommendedBreakType: breakMode,
+        recommendedBreakMinutes: breakMinutes,
+      });
+      return;
+    }
+
+    commitStudyCompletionAndStartBreak(0, true);
+  }, [
+    activeSegmentIndex,
+    resolveBreakPlan,
+    commitStudyCompletionAndStartBreak,
+    handleCountdownZero,
+  ]);
+
+  const completeCurrentBlock = useCallback(() => {
+    if (modeRef.current !== 'study') {
+      handleCountdownZero();
+      return;
+    }
+    const s = settingsRef.current;
+    if (s.intervalMode === 'time' && remainingRef.current >= 60) {
+      const { breakMode, breakMinutes } = resolveBreakPlan(cyclesRef.current + 1);
+      const segments = activeRouteRef.current?.step?.segments || [];
+      const nextSeg =
+        segments.length > 1 && activeSegmentIndex < segments.length - 1
+          ? segments[activeSegmentIndex + 1]
+          : null;
+      setTransitionPrompt({
+        kind: nextSeg ? 'segment_early' : 'block_early',
+        unusedSeconds: remainingRef.current,
+        nextSegment: nextSeg,
+        recommendedBreakType: breakMode,
+        recommendedBreakMinutes: breakMinutes,
+      });
+      return;
+    }
+    commitStudyCompletionAndStartBreak(0, true);
+  }, [
+    activeSegmentIndex,
+    resolveBreakPlan,
+    commitStudyCompletionAndStartBreak,
+    handleCountdownZero,
+  ]);
+
+  const chooseContinueNextSegment = useCallback((): RouteSegment | null => {
+    const seg = transitionPrompt?.nextSegment ?? null;
+    if (!seg) return null;
+    setActiveSegmentIndex((prev) => prev + 1);
+    setTransitionPrompt(null);
+    setIsRunning(true);
+    playStudyTone('tick', settingsRef.current.audioEnabled);
+    onRequestOpenSegmentRef.current?.(seg);
+    return seg;
+  }, [transitionPrompt]);
+
+  const chooseStartBreak = useCallback(
+    (includeUnusedSeconds: boolean) => {
+      const unused = includeUnusedSeconds ? transitionPrompt?.unusedSeconds || 0 : 0;
+      setTransitionPrompt(null);
+      commitStudyCompletionAndStartBreak(unused, false);
+    },
+    [transitionPrompt, commitStudyCompletionAndStartBreak]
+  );
+
+  const chooseSkipBreakToNextBlock = useCallback(() => {
+    const s = settingsRef.current;
+    const routeCtx = activeRouteRef.current;
+    const nextCycles = cyclesRef.current + 1;
+    setCyclesCompleted(nextCycles);
+    setTransitionPrompt(null);
+    playStudyTone('success', s.audioEnabled);
+
+    const stepCompleted = routeCtx?.step?.type === 'study' ? routeCtx.step : null;
+    if (stepCompleted) {
+      onStepCompletedRef.current?.(
+        stepCompleted.id,
+        stepCompleted.docId,
+        stepCompleted.endPage
+      );
+    }
+
+    advanceToNextRouteStep(stepCompleted, true);
+  }, [advanceToNextRouteStep]);
+
+  const dismissTransitionPrompt = useCallback(() => {
+    setTransitionPrompt(null);
+  }, []);
+
+  const adjustTimerSeconds = useCallback((deltaSeconds: number) => {
+    setRemainingSeconds((prev) => {
+      const next = Math.max(30, prev + deltaSeconds);
+      setTotalDurationSeconds((tot) => Math.max(tot, next));
+      return next;
+    });
+  }, []);
+
+  const extendStudyAndAdaptPlan = useCallback(
+    (extraMinutes = 5) => {
+      const targetStep = lastCompletedStudyStep || activeRouteRef.current?.step || null;
+      const newExtraTotal = accumulatedExtraMinutes + extraMinutes;
+      setAccumulatedExtraMinutes(newExtraTotal);
+
+      setCyclesCompleted((prev) => Math.max(0, prev - 1));
+      setCanExtendStudyFromBreak(false);
+      setTransitionPrompt(null);
+      setModeState('study');
+      const dur = Math.max(60, extraMinutes * 60);
+      setTotalDurationSeconds(dur);
+      setRemainingSeconds(dur);
+      setElapsedSeconds(0);
+      setIsRunning(true);
+
+      playStudyTone('tick', settingsRef.current.audioEnabled);
+      onStepReopenedRef.current?.(targetStep, extraMinutes);
+    },
+    [lastCompletedStudyStep, accumulatedExtraMinutes]
+  );
+
+  const skipBreakAndContinue = useCallback(() => {
+    const s = settingsRef.current;
+    playStudyTone('breakEnd', s.audioEnabled);
+    advanceToNextRouteStep(lastCompletedStudyStep, true);
+  }, [lastCompletedStudyStep, advanceToNextRouteStep]);
 
   const value = useMemo<TimerContextValue>(
     () => ({
@@ -284,13 +591,25 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
       totalPlannedBlocks,
       activeRouteStep: activeRoute?.step ?? null,
       activeNextStep: activeRoute?.nextStep ?? null,
+      activeSegmentIndex,
+      canExtendStudyFromBreak,
+      transitionPrompt,
       setMode,
       toggleTimer,
       resetTimer,
       skipCycle,
       setTotalPlannedBlocks,
       startRouteStep,
+      setActiveSegmentIndex,
       completeCurrentBlock,
+      completeCurrentSegment,
+      chooseContinueNextSegment,
+      chooseStartBreak,
+      chooseSkipBreakToNextBlock,
+      dismissTransitionPrompt,
+      adjustTimerSeconds,
+      extendStudyAndAdaptPlan,
+      skipBreakAndContinue,
     }),
     [
       mode,
@@ -301,12 +620,23 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
       cyclesCompleted,
       totalPlannedBlocks,
       activeRoute,
+      activeSegmentIndex,
+      canExtendStudyFromBreak,
+      transitionPrompt,
       setMode,
       toggleTimer,
       resetTimer,
       skipCycle,
       startRouteStep,
       completeCurrentBlock,
+      completeCurrentSegment,
+      chooseContinueNextSegment,
+      chooseStartBreak,
+      chooseSkipBreakToNextBlock,
+      dismissTransitionPrompt,
+      adjustTimerSeconds,
+      extendStudyAndAdaptPlan,
+      skipBreakAndContinue,
     ]
   );
 
@@ -318,4 +648,3 @@ export function useTimer(): TimerContextValue {
   if (!ctx) throw new Error('useTimer debe usarse dentro de TimerProvider');
   return ctx;
 }
-

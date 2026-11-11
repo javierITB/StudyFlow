@@ -2,6 +2,7 @@ import {
   DocumentRecord,
   FeasibilityStatus,
   FolderRecord,
+  RouteSegment,
   RouteStep,
   StudyPlanResult,
   StudySettings,
@@ -14,6 +15,21 @@ export interface GenerateRouteParams {
   deadline: string;
   completedStepIds?: string[];
   now?: Date;
+}
+
+interface PendingDocSlice {
+  docId: string;
+  docName: string;
+  folderName?: string;
+  cursor: number;
+  endPage: number;
+}
+
+interface RawStudyBlock {
+  segments: RouteSegment[];
+  durationMinutes: number;
+  finishedADoc: boolean;
+  nextDocNameAfterBlock?: string;
 }
 
 function formatDayLabel(dayNumber: number, baseDate: Date): string {
@@ -31,8 +47,11 @@ function formatDayLabel(dayNumber: number, baseDate: Date): string {
 
 /**
  * Genera una ruta secuencial de estudio hasta la fecha limite.
- * Inserta descansos cortos dentro del mismo documento y descansos largos
- * al cambiar de un archivo a otro (o tras N bloques continuos si es extenso).
+ * Soporta tres estrategias de bloques:
+ * - 'pack': empaqueta documentos cortos consecutivos dentro del mismo ciclo (ej. 25 min o N pags)
+ *   y coloca el descanso al completar el bloque o cambiar de tema tras terminarlo.
+ * - 'exact_doc': ajusta la duracion del bloque al tiempo real estimado de cada archivo.
+ * - 'full_block': asigna al menos un bloque Pomodoro completo a cada archivo.
  */
 export function generateStudyRoute({
   documents,
@@ -45,13 +64,6 @@ export function generateStudyRoute({
   const folderMap = new Map(folders.map((f) => [f.id, f.name]));
   const completedSet = new Set(completedStepIds);
 
-  const rawSteps: Omit<RouteStep, 'dayNumber' | 'dayLabel'>[] = [];
-  let totalPages = 0;
-  let totalStudyBlocks = 0;
-  let totalStudyMinutes = 0;
-  let totalBreakMinutes = 0;
-  let stepOrder = 1;
-
   const validDocs = documents.filter((doc) => (doc.pageCount || 0) > 0);
   const speed = Math.max(0.5, settings.speedMinPerPage || 3);
   const studyMin = Math.max(5, settings.studyMinutes || 25);
@@ -59,123 +71,262 @@ export function generateStudyRoute({
   const shortBreak = Math.max(1, settings.shortBreakMinutes || 5);
   const longBreak = Math.max(2, settings.longBreakMinutes || 15);
   const everyN = Math.max(0, settings.longBreakEveryNBlocks || 0);
+  const allocationMode = settings.blockAllocationMode || 'pack';
 
-  validDocs.forEach((doc, docIndex) => {
+  let totalPages = 0;
+  const docSlices: PendingDocSlice[] = validDocs.map((doc) => {
     const docTotalPages = Math.max(1, doc.pageCount);
     const startPage = settings.resumeFromCurrentPage
       ? Math.min(Math.max(1, doc.currentPage || 1), docTotalPages)
       : 1;
-    const remainingPages = Math.max(1, docTotalPages - startPage + 1);
+    totalPages += Math.max(1, docTotalPages - startPage + 1);
+    return {
+      docId: doc.id,
+      docName: doc.name,
+      folderName: doc.folderId ? folderMap.get(doc.folderId) : undefined,
+      cursor: startPage,
+      endPage: docTotalPages,
+    };
+  });
 
-    totalPages += remainingPages;
+  const studyBlocks: RawStudyBlock[] = [];
 
-    const folderName = doc.folderId ? folderMap.get(doc.folderId) : undefined;
-    const docBlocks: Array<{ startPage: number; endPage: number; durationMinutes: number }> = [];
+  if (allocationMode === 'pack') {
+    let sliceIdx = 0;
 
-    if (settings.intervalMode === 'pages') {
-      let cursor = startPage;
-      while (cursor <= docTotalPages) {
-        const end = Math.min(docTotalPages, cursor + pagesPerBlockSetting - 1);
-        const count = end - cursor + 1;
-        docBlocks.push({
-          startPage: cursor,
-          endPage: end,
-          durationMinutes: Math.max(1, Math.round(count * speed)),
-        });
-        cursor = end + 1;
-      }
-    } else {
-      const totalDocMinutes = remainingPages * speed;
-      const numBlocks = Math.max(1, Math.ceil(totalDocMinutes / studyMin));
-      let cursor = startPage;
+    while (sliceIdx < docSlices.length) {
+      const segments: RouteSegment[] = [];
+      let blockUsedCapacity = 0;
+      const blockCapacity =
+        settings.intervalMode === 'pages' ? pagesPerBlockSetting : studyMin;
+      let finishedADoc = false;
 
-      for (let b = 0; b < numBlocks; b++) {
-        const blocksRemaining = numBlocks - b;
-        const pagesLeft = docTotalPages - cursor + 1;
-        const pagesThisBlock =
-          b === numBlocks - 1
-            ? pagesLeft
-            : Math.max(1, Math.round(pagesLeft / blocksRemaining));
-        const end = Math.min(docTotalPages, cursor + pagesThisBlock - 1);
-        const actualCount = Math.max(0, end - cursor + 1);
-        const estMinutes =
-          b === numBlocks - 1
-            ? Math.max(1, Math.min(studyMin, Math.round(actualCount * speed)))
-            : studyMin;
+      while (sliceIdx < docSlices.length) {
+        const current = docSlices[sliceIdx];
+        const pagesRemaining = current.endPage - current.cursor + 1;
+        if (pagesRemaining <= 0) {
+          sliceIdx++;
+          continue;
+        }
 
-        if (actualCount > 0) {
-          docBlocks.push({
-            startPage: cursor,
-            endPage: end,
-            durationMinutes: estMinutes,
+        const remainingCapacity = blockCapacity - blockUsedCapacity;
+
+        if (settings.intervalMode === 'pages') {
+          if (remainingCapacity <= 0) break;
+          const pagesToTake = Math.min(pagesRemaining, remainingCapacity);
+          const segEnd = current.cursor + pagesToTake - 1;
+          segments.push({
+            docId: current.docId,
+            docName: current.docName,
+            folderName: current.folderName,
+            startPage: current.cursor,
+            endPage: segEnd,
+            pageCount: pagesToTake,
+            estimatedMinutes: Math.max(1, Math.round(pagesToTake * speed)),
           });
-          cursor = end + 1;
+          current.cursor = segEnd + 1;
+          blockUsedCapacity += pagesToTake;
+        } else {
+          // Modo tiempo: cuantas paginas caben en la capacidad restante del bloque
+          if (remainingCapacity < speed && segments.length > 0) {
+            break;
+          }
+          const exactPagesInCap =
+            segments.length === 0 && remainingCapacity < speed
+              ? 1
+              : Math.max(1, Math.floor(remainingCapacity / speed));
+          const pagesToTake = Math.min(pagesRemaining, exactPagesInCap);
+          const segEnd = current.cursor + pagesToTake - 1;
+          const segMinutes = Math.max(1, Math.round(pagesToTake * speed));
+
+          segments.push({
+            docId: current.docId,
+            docName: current.docName,
+            folderName: current.folderName,
+            startPage: current.cursor,
+            endPage: segEnd,
+            pageCount: pagesToTake,
+            estimatedMinutes: segMinutes,
+          });
+          current.cursor = segEnd + 1;
+          blockUsedCapacity += segMinutes;
+        }
+
+        if (current.cursor > current.endPage) {
+          finishedADoc = true;
+          sliceIdx++;
+        } else {
+          // El documento sigue teniendo paginas pendientes, asi que este bloque ya se lleno
+          break;
         }
       }
+
+      if (segments.length > 0) {
+        const rawEstMinutes = segments.reduce((sum, s) => sum + s.estimatedMinutes, 0);
+        const blockDuration =
+          settings.intervalMode === 'time'
+            ? Math.max(1, Math.min(studyMin, rawEstMinutes))
+            : Math.max(1, rawEstMinutes);
+
+        studyBlocks.push({
+          segments,
+          durationMinutes: blockDuration,
+          finishedADoc,
+          nextDocNameAfterBlock:
+            sliceIdx < docSlices.length ? docSlices[sliceIdx].docName : undefined,
+        });
+      }
     }
+  } else {
+    // 'exact_doc' o 'full_block': cada documento mantiene sus bloques independientes
+    docSlices.forEach((doc, idx) => {
+      const remainingPages = doc.endPage - doc.cursor + 1;
+      const nextDocName =
+        idx + 1 < docSlices.length ? docSlices[idx + 1].docName : undefined;
 
-    let blocksInsideDoc = 0;
-    docBlocks.forEach((block, blockIdx) => {
-      const stepId = `step_${doc.id}_${block.startPage}_${block.endPage}_${blockIdx}`;
-      const pageCount = block.endPage - block.startPage + 1;
+      if (settings.intervalMode === 'pages') {
+        let cursor = doc.cursor;
+        while (cursor <= doc.endPage) {
+          const segEnd = Math.min(doc.endPage, cursor + pagesPerBlockSetting - 1);
+          const count = segEnd - cursor + 1;
+          const estMin = Math.max(1, Math.round(count * speed));
+          const isLastOfDoc = segEnd >= doc.endPage;
+          studyBlocks.push({
+            segments: [
+              {
+                docId: doc.docId,
+                docName: doc.docName,
+                folderName: doc.folderName,
+                startPage: cursor,
+                endPage: segEnd,
+                pageCount: count,
+                estimatedMinutes: estMin,
+              },
+            ],
+            durationMinutes: estMin,
+            finishedADoc: isLastOfDoc,
+            nextDocNameAfterBlock: isLastOfDoc ? nextDocName : undefined,
+          });
+          cursor = segEnd + 1;
+        }
+      } else {
+        const totalDocMinutes = remainingPages * speed;
+        const numBlocks = Math.max(1, Math.ceil(totalDocMinutes / studyMin));
+        let cursor = doc.cursor;
 
-      rawSteps.push({
-        id: stepId,
-        order: stepOrder++,
-        type: 'study',
-        docId: doc.id,
-        docName: doc.name,
-        folderName,
-        startPage: block.startPage,
-        endPage: block.endPage,
-        pageCount,
-        durationMinutes: block.durationMinutes,
-        completed: completedSet.has(stepId),
-      });
+        for (let b = 0; b < numBlocks; b++) {
+          const blocksRemaining = numBlocks - b;
+          const pagesLeft = doc.endPage - cursor + 1;
+          const pagesThisBlock =
+            b === numBlocks - 1
+              ? pagesLeft
+              : Math.max(1, Math.round(pagesLeft / blocksRemaining));
+          const segEnd = Math.min(doc.endPage, cursor + pagesThisBlock - 1);
+          const actualCount = Math.max(0, segEnd - cursor + 1);
+          if (actualCount <= 0) continue;
 
-      totalStudyBlocks++;
-      totalStudyMinutes += block.durationMinutes;
-      blocksInsideDoc++;
+          const exactEst = Math.max(1, Math.round(actualCount * speed));
+          const durationMinutes =
+            allocationMode === 'full_block'
+              ? studyMin
+              : b === numBlocks - 1
+                ? Math.min(studyMin, exactEst)
+                : studyMin;
 
-      const isLastBlockInDoc = blockIdx === docBlocks.length - 1;
-      const isLastDoc = docIndex === validDocs.length - 1;
+          const isLastOfDoc = b === numBlocks - 1 || segEnd >= doc.endPage;
 
-      if (!isLastBlockInDoc) {
-        // Descanso dentro del mismo archivo: corto por defecto, o largo cada N bloques continuos
-        const useLongBreak = everyN > 0 && blocksInsideDoc % everyN === 0;
-        const breakMin = useLongBreak ? longBreak : shortBreak;
-        const breakId = `brk_${doc.id}_${blockIdx}`;
-        rawSteps.push({
-          id: breakId,
-          order: stepOrder++,
-          type: useLongBreak ? 'long_break' : 'short_break',
-          docId: doc.id,
-          docName: doc.name,
-          folderName,
-          durationMinutes: breakMin,
-          completed: completedSet.has(breakId),
-        });
-        totalBreakMinutes += breakMin;
-      } else if (!isLastDoc) {
-        // Transición entre un documento y otro: descanso largo si está habilitado
-        const nextDoc = validDocs[docIndex + 1];
-        const useLongTransition = settings.longBreakBetweenDocs;
-        const breakMin = useLongTransition ? longBreak : shortBreak;
-        const breakId = `trans_${doc.id}_to_${nextDoc.id}`;
-        rawSteps.push({
-          id: breakId,
-          order: stepOrder++,
-          type: useLongTransition ? 'long_break' : 'short_break',
-          docId: doc.id,
-          docName: doc.name,
-          nextDocName: nextDoc.name,
-          folderName,
-          durationMinutes: breakMin,
-          completed: completedSet.has(breakId),
-        });
-        totalBreakMinutes += breakMin;
+          studyBlocks.push({
+            segments: [
+              {
+                docId: doc.docId,
+                docName: doc.docName,
+                folderName: doc.folderName,
+                startPage: cursor,
+                endPage: segEnd,
+                pageCount: actualCount,
+                estimatedMinutes: durationMinutes,
+              },
+            ],
+            durationMinutes,
+            finishedADoc: isLastOfDoc,
+            nextDocNameAfterBlock: isLastOfDoc ? nextDocName : undefined,
+          });
+
+          cursor = segEnd + 1;
+        }
       }
     });
+  }
+
+  // Convertir bloques a RouteStep[] intercalando descansos cortos y largos
+  const rawSteps: Omit<RouteStep, 'dayNumber' | 'dayLabel'>[] = [];
+  let totalStudyBlocks = 0;
+  let totalStudyMinutes = 0;
+  let totalBreakMinutes = 0;
+  let stepOrder = 1;
+  let streakWithoutLongBreak = 0;
+
+  studyBlocks.forEach((block, idx) => {
+    const firstSeg = block.segments[0];
+    const lastSeg = block.segments[block.segments.length - 1];
+    const totalBlockPages = block.segments.reduce((sum, s) => sum + s.pageCount, 0);
+
+    const stepId = `step_${block.segments
+      .map((s) => `${s.docId}_${s.startPage}_${s.endPage}`)
+      .join('__')}_${idx}`;
+
+    const displayName =
+      block.segments.length === 1
+        ? firstSeg.docName
+        : `${firstSeg.docName} + ${block.segments.length - 1} más`;
+
+    rawSteps.push({
+      id: stepId,
+      order: stepOrder++,
+      type: 'study',
+      docId: firstSeg.docId,
+      docName: displayName,
+      folderName: firstSeg.folderName,
+      startPage: firstSeg.startPage,
+      endPage: lastSeg.endPage,
+      pageCount: totalBlockPages,
+      segments: block.segments,
+      durationMinutes: block.durationMinutes,
+      completed: completedSet.has(stepId),
+    });
+
+    totalStudyBlocks++;
+    totalStudyMinutes += block.durationMinutes;
+    streakWithoutLongBreak++;
+
+    const isLastBlockOverall = idx === studyBlocks.length - 1;
+    if (!isLastBlockOverall) {
+      const hitPeriodicLong =
+        everyN > 0 && streakWithoutLongBreak % everyN === 0;
+      const shouldBeLongBreak =
+        (block.finishedADoc && settings.longBreakBetweenDocs) || hitPeriodicLong;
+
+      const breakMinutes = shouldBeLongBreak ? longBreak : shortBreak;
+      const breakId = `brk_${idx}_${shouldBeLongBreak ? 'long' : 'short'}`;
+
+      if (shouldBeLongBreak) {
+        streakWithoutLongBreak = 0;
+      }
+
+      rawSteps.push({
+        id: breakId,
+        order: stepOrder++,
+        type: shouldBeLongBreak ? 'long_break' : 'short_break',
+        docId: lastSeg.docId,
+        docName: lastSeg.docName,
+        nextDocName: block.nextDocNameAfterBlock,
+        folderName: lastSeg.folderName,
+        durationMinutes: breakMinutes,
+        completed: completedSet.has(breakId),
+      });
+
+      totalBreakMinutes += breakMinutes;
+    }
   });
 
   const totalMinutes = totalStudyMinutes + totalBreakMinutes;
@@ -191,7 +342,6 @@ export function generateStudyRoute({
   const daysAvailable =
     hoursUntilDeadline > 0 ? Math.max(1, Math.ceil(hoursUntilDeadline / 24)) : 1;
 
-  // Distribuir pasos en dias sin cortar justo antes de un descanso
   const targetDailyMinutes = totalMinutes > 0 ? totalMinutes / daysAvailable : 0;
   const steps: RouteStep[] = [];
   let currentDay = 1;
@@ -241,7 +391,7 @@ export function generateStudyRoute({
     recommendation = `Horario ajustado: necesitarás ~${blocksPerDay.toFixed(1)} bloques/día (${(minutesPerDay / 60).toFixed(1)}h/día incluyendo descansos) para llegar antes del plazo.`;
   } else {
     feasibility = 'optimal';
-    recommendation = `Ruta sostenible: avanza ${blocksPerDay.toFixed(1)} bloques/día (~${Math.round(minutesPerDay)} min diarios) con descansos cortos intra-archivo y descansos largos entre documentos.`;
+    recommendation = `Ruta sostenible: avanza ${blocksPerDay.toFixed(1)} bloques/día (~${Math.round(minutesPerDay)} min diarios) con descansos cortos intra-archivo y descansos largos al cambiar de documento.`;
   }
 
   return {
