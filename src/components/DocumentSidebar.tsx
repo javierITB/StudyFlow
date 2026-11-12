@@ -11,6 +11,7 @@ import {
   FolderPlus,
   GripVertical,
   Loader2,
+  PanelLeftClose,
   Presentation,
   Route,
   Sliders,
@@ -45,6 +46,7 @@ interface DocumentSidebarProps {
   onStartRouteStep: (step: RouteStep, nextStep: RouteStep | null) => void;
   onToggleStepCompleted: (stepId: string) => Promise<void>;
   onOpenPlannerTab: () => void;
+  onCloseDrawer?: () => void;
 }
 
 const FOLDER_COLORS: FolderColor[] = [
@@ -82,6 +84,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   onStartRouteStep,
   onToggleStepCompleted,
   onOpenPlannerTab,
+  onCloseDrawer,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const uploadFolderTargetRef = useRef<string | null>(null);
@@ -161,10 +164,10 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
     const colorClass = active
       ? 'bg-indigo-600 text-white'
       : doc.fileType === 'pptx'
-        ? 'bg-amber-500/15 text-amber-400'
+        ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
         : doc.fileType === 'docx'
-          ? 'bg-sky-500/15 text-sky-400'
-          : 'bg-slate-800 text-slate-300';
+          ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30'
+          : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/35';
 
     return (
       <div
@@ -199,8 +202,8 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
           }}
           className={`group relative rounded-lg border px-2.5 py-2 transition-all ${
             isActive
-              ? 'bg-indigo-950/50 border-indigo-500/80 shadow-sm shadow-indigo-950/50'
-              : 'bg-slate-900/90 border-slate-800/90 hover:border-slate-700 hover:bg-slate-900'
+              ? 'bg-indigo-500/20 border-indigo-400/90 ring-1 ring-indigo-500/45 shadow-sm'
+              : 'bg-slate-900/85 border-indigo-500/20 hover:border-indigo-400/60 hover:bg-indigo-500/5'
           }`}
         >
           <div className="flex items-center gap-2">
@@ -224,7 +227,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                   {doc.name}
                 </h4>
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5">
-                  <span className="uppercase font-mono text-[9px] px-1 rounded bg-slate-800 text-slate-300">
+                  <span className="uppercase font-mono text-[9px] px-1.5 rounded bg-indigo-500/15 text-indigo-200 border border-indigo-500/30">
                     {doc.fileType}
                   </span>
                   <span className="font-mono">
@@ -245,7 +248,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                   setMoveMenuDocId(isMoveOpen ? null : doc.id);
                 }}
                 title="Mover a otra carpeta"
-                className="p-1 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="p-1.5 sm:p-1 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity"
               >
                 <FolderInput className="w-3.5 h-3.5" />
               </button>
@@ -256,7 +259,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                   onDeleteDocument(doc);
                 }}
                 title="Eliminar documento"
-                className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="p-1.5 sm:p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -324,10 +327,10 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   };
 
   return (
-    <aside className="w-full md:w-80 lg:w-96 border-r border-slate-800 bg-slate-900/60 flex flex-col flex-shrink-0 h-2/5 md:h-full overflow-hidden">
+    <aside className="w-full h-full sf-sidebar-chrome backdrop-blur-md flex flex-col overflow-hidden">
       {/* Switch Compacto Archivos | Ruta del Plan */}
-      <div className="px-3 pt-3 pb-2 border-b border-slate-800 bg-slate-900/90">
-        <div className="grid grid-cols-2 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+      <div className="px-3 pt-3 pb-2 border-b border-indigo-500/25 bg-slate-900/60 flex items-center gap-2">
+        <div className="flex-1 grid grid-cols-2 gap-1 bg-slate-950/80 p-1 rounded-xl border border-indigo-500/30">
           <button
             type="button"
             onClick={() => setSidebarTab('files')}
@@ -355,12 +358,26 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
             </span>
           </button>
         </div>
+        {onCloseDrawer && (
+          <button
+            type="button"
+            onClick={onCloseDrawer}
+            title="Colapsar panel lateral"
+            aria-label="Colapsar panel lateral"
+            className="p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/35 hover:border-indigo-400 text-indigo-300 flex-shrink-0 transition-colors"
+          >
+            <PanelLeftClose className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {sidebarTab === 'files' ? (
         <>
           {/* Subida de archivos */}
-          <div className="p-3 border-b border-slate-800 space-y-2.5">
+          <div
+            data-tour-id="tour-sidebar-upload"
+            className="p-3 border-b border-slate-800 space-y-2.5"
+          >
             <div
               onClick={() => triggerUploadIntoFolder(null)}
               onDragEnter={(e) => {
@@ -384,8 +401,8 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
               }}
               className={`border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-colors ${
                 isDragOverUpload
-                  ? 'border-indigo-500 bg-indigo-500/10'
-                  : 'border-slate-700 hover:border-indigo-500 bg-slate-950/40'
+                  ? 'border-indigo-400 bg-indigo-500/15'
+                  : 'border-indigo-500/35 hover:border-indigo-400 bg-indigo-500/[0.04] hover:bg-indigo-500/10'
               }`}
             >
               <input
@@ -433,7 +450,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
               <button
                 type="button"
                 onClick={() => setShowNewFolderForm((v) => !v)}
-                className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium"
+                className="px-2 py-1 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/35 text-[11px] text-indigo-300 flex items-center gap-1 font-medium transition-colors"
               >
                 <FolderPlus className="w-3.5 h-3.5" />
                 <span>Nueva carpeta</span>
@@ -595,7 +612,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                                 triggerUploadIntoFolder(folder.id);
                               }}
                               title={`Subir archivos en "${folder.name}"`}
-                              className="px-1.5 py-0.5 rounded bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-[10px] text-slate-300 opacity-0 group-hover/folder:opacity-100 transition-opacity"
+                              className="px-1.5 py-0.5 rounded bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-[10px] text-slate-300 opacity-100 lg:opacity-0 lg:group-hover/folder:opacity-100 transition-opacity"
                             >
                               + Subir
                             </button>
@@ -606,7 +623,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                                 onDeleteFolder(folder);
                               }}
                               title="Eliminar carpeta"
-                              className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-900/70 opacity-0 group-hover/folder:opacity-100 transition-opacity"
+                              className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-900/70 opacity-100 lg:opacity-0 lg:group-hover/folder:opacity-100 transition-opacity"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -657,13 +674,13 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                     onDrop={(e) => void handleFolderDrop(e, null)}
                   >
                     <div className="flex items-end pl-1">
-                      <div className="h-1 w-14 rounded-t-md bg-slate-700" />
+                      <div className="h-1.5 w-14 rounded-t-md bg-indigo-500/55" />
                     </div>
                     <div
                       className={`rounded-xl rounded-tl-none border transition-all overflow-hidden ${
                         dragOverFolderId === 'unassigned'
-                          ? 'border-indigo-400 bg-indigo-500/10'
-                          : 'border-slate-800 bg-slate-900/50'
+                          ? 'border-indigo-400 bg-indigo-500/15'
+                          : 'border-indigo-500/30 bg-indigo-500/[0.05]'
                       }`}
                     >
                       <div
@@ -671,16 +688,16 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                         className="p-2.5 flex items-center justify-between gap-2 cursor-pointer select-none hover:bg-white/[0.02]"
                       >
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-slate-400">
+                          <span className="text-indigo-300">
                             {collapsedFolders['unassigned'] ? (
                               <ChevronRight className="w-4 h-4" />
                             ) : (
                               <ChevronDown className="w-4 h-4" />
                             )}
                           </span>
-                          <Folder className="w-4 h-4 text-slate-400" />
+                          <Folder className="w-4 h-4 text-indigo-400" />
                           <div className="min-w-0">
-                            <span className="text-xs font-semibold text-slate-200 block">
+                            <span className="text-xs font-semibold text-slate-100 block">
                               Sin carpeta
                             </span>
                             <span className="text-[10px] font-mono text-slate-400">
@@ -697,8 +714,8 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                       </div>
 
                       {!collapsedFolders['unassigned'] && unassignedDocs.length > 0 && (
-                        <div className="px-2.5 pb-2.5 pt-1 bg-slate-950/35 border-t border-slate-800/70">
-                          <div className="pl-2.5 border-l-2 border-slate-700/70 space-y-1.5">
+                        <div className="px-2.5 pb-2.5 pt-1 bg-slate-950/35 border-t border-indigo-500/20">
+                          <div className="pl-2.5 border-l-2 border-indigo-500/35 space-y-1.5">
                             {unassignedDocs.map((doc) => renderDocumentLeaf(doc))}
                           </div>
                         </div>
@@ -757,9 +774,9 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
       )}
 
       {/* Estado de almacenamiento */}
-      <div className="p-3 border-t border-slate-800 bg-slate-900/80 flex items-center justify-between text-[11px] text-slate-400">
+      <div className="p-3 border-t border-indigo-500/25 bg-slate-900/90 flex items-center justify-between text-[11px] text-slate-400">
         <span>Almacenamiento: IndexedDB</span>
-        <span className="text-slate-300 font-medium">{syncStatusLabel}</span>
+        <span className="text-indigo-300 font-medium">{syncStatusLabel}</span>
       </div>
     </aside>
   );

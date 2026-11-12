@@ -23,7 +23,7 @@ StudyFlow funciona **de forma local offline con IndexedDB** incluso sin configur
 1. **Crear proyecto en Supabase** y ejecutar el script [`supabase/schema.sql`](./supabase/schema.sql) en el **SQL Editor** de Supabase (crea las tablas `profiles`, `folders`, `documents`, `notes`, `tasks`, `study_plans`, políticas RLS por usuario y el bucket privado `study-files`).
 2. **Variables de entorno** (en `.env.local` para desarrollo o en **Vercel → Settings → Environment Variables**):
    - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_SUPABASE_PUBLISHABLE_KEY` (o `VITE_SUPABASE_ANON_KEY`)
 3. **Desplegar en Vercel:**
    - Conecta el repositorio en Vercel (`Framework Preset: Vite`, `Build Command: npm run build`, `Output Directory: dist`).
    - [`vercel.json`](./vercel.json) ya incluye el rewrite SPA para producción.

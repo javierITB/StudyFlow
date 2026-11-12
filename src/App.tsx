@@ -25,12 +25,14 @@ import {
   resolveAppearance,
 } from './lib/themes';
 import { mergeReadingSample } from './lib/diagnosticEngine';
+import { formatErrorMessageEs } from './lib/errorMessages';
 import { generateStudyRoute, getDefaultDeadlineLocalString } from './lib/routePlanner';
 import {
   clearAllLocalData,
   dbDelete,
   dbGet,
   dbPut,
+  getSetting,
   loadLocalSnapshot,
   setSetting,
 } from './lib/localDb';
@@ -65,6 +67,7 @@ import { ToastContainer } from './components/ToastContainer';
 import { AccountModal } from './components/AccountModal';
 import { DiagnosticModal } from './components/DiagnosticModal';
 import { AppearanceModal } from './components/AppearanceModal';
+import { TutorialOverlay } from './components/TutorialOverlay';
 
 const DEFAULT_DIAGNOSTIC_DATA: DiagnosticData = {
   isActive: false,
@@ -129,6 +132,10 @@ interface WorkspaceShellProps {
   onToggleTask: (taskId: string) => Promise<void>;
   onDeleteTask: (taskId: string) => Promise<void>;
   onNotify: (msg: string, type?: ToastItem['type']) => void;
+  sidebarOpen: boolean;
+  onSetSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  onOpenTutorial: () => void;
+  forcePomodoroSessionKey: number;
 }
 
 const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
@@ -174,6 +181,10 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   onToggleTask,
   onDeleteTask,
   onNotify,
+  sidebarOpen,
+  onSetSidebarOpen,
+  onOpenTutorial,
+  forcePomodoroSessionKey,
 }) => {
   const { startRouteStep, activeRouteStep } = useTimer();
 
@@ -189,6 +200,9 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
       if (targetDocId) {
         await onOpenDocument(targetDocId, targetStartPage);
         setCurrentModule('docs');
+        if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+          onSetSidebarOpen(false);
+        }
       }
       startRouteStep(step, nextStep);
       onNotify(
@@ -208,7 +222,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
     : 'Modo Local';
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100">
+    <div className="h-[100dvh] flex flex-col overflow-hidden bg-slate-950 text-slate-100">
       <Navbar
         currentModule={currentModule}
         onSwitchModule={setCurrentModule}
@@ -218,32 +232,53 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
         syncStatus={syncStatus}
         onOpenAccountModal={onOpenAccountModal}
         onOpenAppearanceModal={onOpenAppearanceModal}
+        onOpenTutorial={onOpenTutorial}
       />
 
       <main className="flex-1 overflow-hidden relative">
         {currentModule === 'docs' && (
-          <div className="h-full flex flex-col md:flex-row overflow-hidden">
-            <DocumentSidebar
-              folders={folders}
-              documents={documents}
-              activeDocId={activeDocId}
-              speedMinPerPage={studySettings.speedMinPerPage}
-              isUploading={isUploading}
-              syncStatusLabel={syncStatusLabel}
-              planResult={planResult}
-              activeRouteStepId={activeRouteStep?.id || null}
-              onCreateFolder={onCreateFolder}
-              onDeleteFolder={onDeleteFolder}
-              onUploadFiles={onUploadFiles}
-              onOpenDocument={(id) => void onOpenDocument(id)}
-              onMoveDocumentToFolder={onMoveDocumentToFolder}
-              onDeleteDocument={onDeleteDocument}
-              onStartRouteStep={(step, next) =>
-                void handleStartRouteStepInViewer(step, next)
+          <div className="h-full flex overflow-hidden relative">
+            {sidebarOpen && (
+              <div
+                className="fixed inset-0 top-14 bg-slate-950/60 backdrop-blur-[1px] z-20 lg:hidden"
+                onClick={() => onSetSidebarOpen(false)}
+              />
+            )}
+            <div
+              className={
+                sidebarOpen
+                  ? 'absolute inset-y-0 left-0 z-30 w-80 sm:w-[22rem] max-w-[90vw] shadow-2xl lg:static lg:z-auto lg:w-80 xl:w-96 lg:shadow-none flex-shrink-0 h-full transition-all duration-200'
+                  : 'hidden lg:block lg:w-0 lg:overflow-hidden flex-shrink-0 h-full transition-all duration-200'
               }
-              onToggleStepCompleted={onToggleStepCompleted}
-              onOpenPlannerTab={() => setCurrentModule('pomodoro')}
-            />
+            >
+              <DocumentSidebar
+                folders={folders}
+                documents={documents}
+                activeDocId={activeDocId}
+                speedMinPerPage={studySettings.speedMinPerPage}
+                isUploading={isUploading}
+                syncStatusLabel={syncStatusLabel}
+                planResult={planResult}
+                activeRouteStepId={activeRouteStep?.id || null}
+                onCreateFolder={onCreateFolder}
+                onDeleteFolder={onDeleteFolder}
+                onUploadFiles={onUploadFiles}
+                onOpenDocument={(id) => {
+                  void onOpenDocument(id);
+                  if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                    onSetSidebarOpen(false);
+                  }
+                }}
+                onMoveDocumentToFolder={onMoveDocumentToFolder}
+                onDeleteDocument={onDeleteDocument}
+                onStartRouteStep={(step, next) =>
+                  void handleStartRouteStepInViewer(step, next)
+                }
+                onToggleStepCompleted={onToggleStepCompleted}
+                onOpenPlannerTab={() => setCurrentModule('pomodoro')}
+                onCloseDrawer={() => onSetSidebarOpen(false)}
+              />
+            </div>
 
             <DocumentViewer
               activeDoc={activeDoc}
@@ -266,6 +301,8 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
               onUpdateNote={onUpdateNote}
               onDeleteNote={onDeleteNote}
               onNotify={onNotify}
+              sidebarOpen={sidebarOpen}
+              onToggleSidebar={() => onSetSidebarOpen((v) => !v)}
             />
           </div>
         )}
@@ -291,6 +328,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
             onToggleTask={onToggleTask}
             onDeleteTask={onDeleteTask}
             onNotify={onNotify}
+            forceSessionKey={forcePomodoroSessionKey}
           />
         )}
 
@@ -340,8 +378,29 @@ export const App: React.FC = () => {
   const [accountModalOpen, setAccountModalOpen] = useState<boolean>(false);
   const [diagnosticModalOpen, setDiagnosticModalOpen] = useState<boolean>(false);
   const [appearanceModalOpen, setAppearanceModalOpen] = useState<boolean>(false);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [tutorialOpen, setTutorialOpen] = useState<boolean>(false);
+  const [forcePomodoroSessionKey, setForcePomodoroSessionKey] = useState<number>(0);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const handleCloseTutorial = useCallback((markCompleted: boolean) => {
+    setTutorialOpen(false);
+    if (markCompleted) {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('sf_tutorial_dismissed', '1');
+      }
+      void setSetting('tutorialDismissed', true);
+    }
+  }, []);
+
+  const handleEnsureSidebarOpen = useCallback(() => {
+    setSidebarOpen(true);
+  }, []);
+
+  const handleEnsurePomodoroSession = useCallback(() => {
+    setForcePomodoroSessionKey((k) => k + 1);
+  }, []);
 
   const resolvedAppearance = useMemo(
     () => resolveAppearance(studySettings.appearance),
@@ -396,6 +455,14 @@ export const App: React.FC = () => {
         setActiveBuffer(first.data);
       }
     }
+
+    const dismissedLocal =
+      typeof window !== 'undefined' &&
+      window.localStorage.getItem('sf_tutorial_dismissed') === '1';
+    const dismissedDb = await getSetting<boolean>('tutorialDismissed');
+    if (!dismissedLocal && !dismissedDb) {
+      setTutorialOpen(true);
+    }
   }, []);
 
   const hydrateFromCloud = useCallback(
@@ -436,7 +503,13 @@ export const App: React.FC = () => {
       } catch (err) {
         console.error('Error sincronizando con Supabase:', err);
         setSyncStatus('error');
-        notify('No se pudo sincronizar con la nube; usando caché local', 'warning');
+        notify(
+          formatErrorMessageEs(
+            err,
+            'No se pudo sincronizar con la nube; usando caché local'
+          ),
+          'warning'
+        );
       }
     },
     [notify]
@@ -657,7 +730,7 @@ export const App: React.FC = () => {
             'success'
           );
         } catch (err) {
-          const msg = err instanceof Error ? err.message : `Error al leer ${file.name}`;
+          const msg = formatErrorMessageEs(err, `Error al leer ${file.name}`);
           notify(msg, 'warning');
         }
       }
@@ -977,18 +1050,25 @@ export const App: React.FC = () => {
   const handleSignIn = async (email: string, password: string) => {
     if (!supabase) return;
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    if (error) {
+      throw new Error(formatErrorMessageEs(error, 'Error al iniciar sesión'));
+    }
     notify('Sesión iniciada correctamente', 'success');
   };
 
   const handleSignUp = async (email: string, password: string, fullName: string) => {
     if (!supabase) return;
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { full_name: fullName } },
     });
-    if (error) throw error;
+    if (error) {
+      throw new Error(formatErrorMessageEs(error, 'Error al registrar la cuenta'));
+    }
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      throw new Error('Ya existe una cuenta registrada con ese correo electrónico.');
+    }
     notify(
       'Cuenta registrada. Revisa tu correo si Supabase solicita verificación.',
       'success'
@@ -1318,6 +1398,10 @@ export const App: React.FC = () => {
         onToggleTask={handleToggleTask}
         onDeleteTask={handleDeleteTask}
         onNotify={notify}
+        sidebarOpen={sidebarOpen}
+        onSetSidebarOpen={setSidebarOpen}
+        onOpenTutorial={() => setTutorialOpen(true)}
+        forcePomodoroSessionKey={forcePomodoroSessionKey}
       />
 
       <ConfirmModal
@@ -1369,6 +1453,14 @@ export const App: React.FC = () => {
         onChange={handleChangeAppearance}
         onReset={handleResetAppearance}
         onClose={() => setAppearanceModalOpen(false)}
+      />
+
+      <TutorialOverlay
+        open={tutorialOpen}
+        onClose={handleCloseTutorial}
+        onNavigateModule={setCurrentModule}
+        onEnsureSidebarOpen={handleEnsureSidebarOpen}
+        onEnsurePomodoroSession={handleEnsurePomodoroSession}
       />
 
       <ToastContainer toasts={toasts} />

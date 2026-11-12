@@ -83,11 +83,11 @@ export const FOLDER_COLOR_CLASSES: Record<
   indigo: {
     dot: 'bg-indigo-400',
     badge: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
-    border: 'border-indigo-500/40',
-    tabBg: 'bg-indigo-500/70',
-    headerBg: 'bg-indigo-950/30',
+    border: 'border-indigo-500/45',
+    tabBg: 'bg-indigo-500/75',
+    headerBg: 'bg-indigo-500/10',
     iconText: 'text-indigo-400',
-    guideBorder: 'border-indigo-500/35',
+    guideBorder: 'border-indigo-500/40',
   },
   emerald: {
     dot: 'bg-emerald-400',

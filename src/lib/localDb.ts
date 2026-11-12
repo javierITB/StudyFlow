@@ -163,7 +163,14 @@ export async function loadLocalSnapshot(): Promise<{
     documents,
     notes,
     tasks,
-    studySettings: { ...DEFAULT_STUDY_SETTINGS, ...(storedSettings || {}) },
+    studySettings: {
+      ...DEFAULT_STUDY_SETTINGS,
+      ...(storedSettings || {}),
+      appearance: {
+        ...(DEFAULT_STUDY_SETTINGS.appearance!),
+        ...(storedSettings?.appearance || {}),
+      },
+    },
     planState,
   };
 }

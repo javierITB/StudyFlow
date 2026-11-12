@@ -65,7 +65,10 @@ export type ThemePresetId =
   | 'nordic'
   | 'forest'
   | 'espresso'
-  | 'paper_light';
+  | 'rose_night'
+  | 'crimson_night'
+  | 'paper_light'
+  | 'rose_light';
 
 export type AccentColorId =
   | 'indigo'
@@ -73,7 +76,20 @@ export type AccentColorId =
   | 'emerald'
   | 'sky'
   | 'amber'
-  | 'rose';
+  | 'rose'
+  | 'pink'
+  | 'crimson'
+  | 'custom';
+
+export type WallpaperId =
+  | 'solid'
+  | 'mesh_accent'
+  | 'botanical'
+  | 'rose_bloom'
+  | 'crimson_dusk'
+  | 'ocean_grid'
+  | 'dots_studio'
+  | 'custom_image';
 
 export type PaperToneId = 'pure' | 'warm' | 'soft_gray';
 
@@ -86,6 +102,10 @@ export type UiScaleId = 'compact' | 'normal' | 'comfortable';
 export interface AppearanceSettings {
   themeId: ThemePresetId;
   accentId: AccentColorId;
+  customAccentHex?: string;
+  wallpaperId?: WallpaperId;
+  customWallpaperDataUrl?: string;
+  wallpaperDim?: number;
   paperTone: PaperToneId;
   fontFamily: FontChoiceId;
   uiRadius: UiRadiusId;

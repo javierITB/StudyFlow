@@ -115,7 +115,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   return (
     <div className="h-full flex flex-col bg-slate-950 overflow-hidden">
       {/* Toolbar */}
-      <div className="min-h-14 py-2 border-b border-slate-800 bg-slate-900/90 px-4 flex flex-wrap items-center justify-between gap-3 flex-shrink-0 z-20">
+      <div
+        data-tour-id="tour-kanban-toolbar"
+        className="min-h-14 py-2 border-b border-slate-800 bg-slate-900/90 px-4 flex flex-wrap items-center justify-between gap-3 flex-shrink-0 z-20"
+      >
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
             <LayoutGrid className="w-5 h-5 text-indigo-400" />
@@ -177,8 +180,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       </div>
 
       {/* Columnas Kanban */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto p-4 md:p-6 bg-slate-950">
-        <div className="min-w-[920px] h-full grid grid-cols-4 gap-4">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 sf-env-canvas">
+        <div className="h-full grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
           {ZONES.map((zone) => {
             const zoneNotes = visibleNotes.filter((n) => (n.zone || 'ideas') === zone.id);
             const isOver = dragOverZone === zone.id;
@@ -192,10 +195,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                 }}
                 onDragLeave={() => setDragOverZone(null)}
                 onDrop={(e) => void handleDrop(e, zone.id)}
-                className={`border rounded-2xl flex flex-col overflow-hidden transition-colors ${
+                className={`border rounded-2xl flex flex-col overflow-hidden transition-colors min-h-[280px] xl:min-h-0 ${
                   isOver
-                    ? 'border-indigo-500 bg-slate-800/80'
-                    : 'border-slate-800 bg-slate-900/70'
+                    ? 'border-indigo-500 bg-indigo-500/10'
+                    : 'border-slate-800 bg-slate-900/75'
                 }`}
               >
                 <div className="p-3 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between">

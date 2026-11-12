@@ -101,6 +101,10 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
   const studySettings: StudySettings = {
     ...DEFAULT_STUDY_SETTINGS,
     ...remoteSettings,
+    appearance: {
+      ...(DEFAULT_STUDY_SETTINGS.appearance!),
+      ...(remoteSettings.appearance || {}),
+    },
   };
 
   const planState = (planRes.data?.plan_data as PersistedPlanState | undefined) || null;

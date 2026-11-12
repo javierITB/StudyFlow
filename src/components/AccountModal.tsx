@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../types/studyflow';
 import { isSupabaseConfigured } from '../lib/supabaseClient';
+import { formatErrorMessageEs } from '../lib/errorMessages';
 
 interface AccountModalProps {
   open: boolean;
@@ -61,7 +62,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       onClose();
     } catch (err) {
       setErrorMsg(
-        err instanceof Error ? err.message : 'Error al autenticar con Supabase'
+        formatErrorMessageEs(err, 'Error al autenticar con Supabase')
       );
     } finally {
       setIsSubmitting(false);
@@ -112,7 +113,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               Para activar cuentas multi-estudiante en Vercel, ejecuta{' '}
               <code className="text-indigo-300">supabase/schema.sql</code> en tu proyecto
               Supabase y agrega <code className="text-indigo-300">VITE_SUPABASE_URL</code>{' '}
-              y <code className="text-indigo-300">VITE_SUPABASE_ANON_KEY</code> en tus
+              y <code className="text-indigo-300">VITE_SUPABASE_PUBLISHABLE_KEY</code> (o{' '}
+              <code className="text-indigo-300">VITE_SUPABASE_ANON_KEY</code>) en tus
               variables de entorno.
             </p>
           </div>
@@ -155,7 +157,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
             <div className="grid grid-cols-2 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
               <button
                 type="button"
-                onClick={() => setAuthMode('login')}
+                onClick={() => {
+                  setAuthMode('login');
+                  setErrorMsg(null);
+                }}
                 className={`py-1.5 rounded-lg font-semibold ${
                   authMode === 'login'
                     ? 'bg-indigo-600 text-white'
@@ -166,7 +171,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setAuthMode('register')}
+                onClick={() => {
+                  setAuthMode('register');
+                  setErrorMsg(null);
+                }}
                 className={`py-1.5 rounded-lg font-semibold ${
                   authMode === 'register'
                     ? 'bg-indigo-600 text-white'

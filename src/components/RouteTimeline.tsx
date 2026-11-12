@@ -248,7 +248,7 @@ export const RouteTimeline: React.FC<RouteTimelineProps> = ({
             key={dayNum}
             className={`rounded-2xl border overflow-hidden transition-colors ${
               isCurrentDay
-                ? 'border-indigo-500/45 bg-indigo-950/15'
+                ? 'border-indigo-500/55 bg-indigo-500/[0.09]'
                 : isDayDone
                   ? 'border-emerald-500/25 bg-slate-950/40 opacity-75'
                   : 'border-slate-800 bg-slate-900/50'
@@ -259,7 +259,7 @@ export const RouteTimeline: React.FC<RouteTimelineProps> = ({
               type="button"
               onClick={() => toggleDay(dayNum)}
               className={`w-full px-3 py-2.5 text-left transition-colors hover:bg-white/[0.02] ${
-                dayExpanded && isCurrentDay ? 'border-b border-indigo-500/20' : ''
+                dayExpanded && isCurrentDay ? 'border-b border-indigo-500/25' : ''
               }`}
             >
               <div className="flex items-center justify-between gap-2">
@@ -347,8 +347,8 @@ export const RouteTimeline: React.FC<RouteTimelineProps> = ({
                             step.completed
                               ? 'bg-slate-950/35 border-slate-800/70 opacity-65'
                               : isCurrent
-                                ? 'bg-indigo-950/40 border-indigo-500/80 shadow-sm shadow-indigo-950/40'
-                                : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+                                ? 'bg-indigo-500/20 border-indigo-400/80 ring-1 ring-indigo-500/30 shadow-sm'
+                                : 'bg-slate-900/80 border-slate-800 hover:border-indigo-500/40'
                           }`}
                         >
                           {/* Cabecera compacta de la Etapa */}
@@ -397,7 +397,7 @@ export const RouteTimeline: React.FC<RouteTimelineProps> = ({
                                     Etapa {stageNumber}
                                   </span>
                                   {partLabel && (
-                                    <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/10 border border-indigo-500/25 px-1.5 py-0.5 rounded">
+                                    <span className="text-[10px] font-mono text-indigo-200 bg-indigo-500/15 border border-indigo-500/35 px-1.5 py-0.5 rounded">
                                       {partLabel}
                                     </span>
                                   )}
