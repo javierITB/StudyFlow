@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import { DOMParser as XmlDomParser } from '@xmldom/xmldom';
-import { detectDocumentType } from '../documentUtils';
+import { computeStageHorizontalMargins, detectDocumentType } from '../documentUtils';
 import { parsePptxDocument } from '../pptxParser';
 
 describe('Document format detection & PPTX parsing', () => {
@@ -117,6 +117,56 @@ describe('Document format detection & PPTX parsing', () => {
       );
       expect(parsed.slides[0].elements[0].paragraphs[0].runs[0].bold).toBe(true);
     }
+  });
+
+  it('colapsa los margenes horizontales cuando no hay notas sobresaliendo y los abre segun la ubicacion de las notas', () => {
+    const base = {
+      sheetWidth: 794,
+      secondarySheetWidth: 794,
+      spreadGapPx: 16,
+      hasSecondaryPage: false,
+      pageNotes: [],
+      secondaryPageNotes: [],
+      noteWidth: 212,
+      isInteractiveMarginOpen: false,
+    };
+
+    // Sin notas ni modo interactivo: cero margen extra
+    expect(computeStageHorizontalMargins(base)).toEqual({
+      leftMargin: 0,
+      rightMargin: 0,
+      hasMarginOverhang: false,
+    });
+
+    // Con nota dentro de la hoja: sigue sin abrir margenes laterales
+    expect(
+      computeStageHorizontalMargins({
+        ...base,
+        pageNotes: [{ xRatio: 0.25 }],
+      })
+    ).toEqual({
+      leftMargin: 0,
+      rightMargin: 0,
+      hasMarginOverhang: false,
+    });
+
+    // Con nota en margen derecho: solo abre el margen derecho necesario
+    const withRightMargin = computeStageHorizontalMargins({
+      ...base,
+      pageNotes: [{ xRatio: 1.025 }],
+    });
+    expect(withRightMargin.leftMargin).toBe(0);
+    expect(withRightMargin.rightMargin).toBeGreaterThanOrEqual(240);
+    expect(withRightMargin.hasMarginOverhang).toBe(true);
+
+    // En modo interativo (Pegar nota / arrastrando): abre ambos lados para soltar notas
+    const interactive = computeStageHorizontalMargins({
+      ...base,
+      isInteractiveMarginOpen: true,
+    });
+    expect(interactive.leftMargin).toBeGreaterThanOrEqual(240);
+    expect(interactive.rightMargin).toBeGreaterThanOrEqual(240);
+    expect(interactive.hasMarginOverhang).toBe(false);
   });
 });
 

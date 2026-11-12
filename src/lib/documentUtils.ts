@@ -135,3 +135,97 @@ export const FOLDER_COLOR_CLASSES: Record<
     guideBorder: 'border-purple-500/35',
   },
 };
+
+export interface StageMarginParams {
+  sheetWidth: number;
+  secondarySheetWidth: number;
+  spreadGapPx: number;
+  hasSecondaryPage: boolean;
+  pageNotes: Array<{ xRatio?: number | null }>;
+  secondaryPageNotes: Array<{ xRatio?: number | null }>;
+  noteWidth: number;
+  isInteractiveMarginOpen: boolean;
+}
+
+export interface StageMarginResult {
+  leftMargin: number;
+  rightMargin: number;
+  hasMarginOverhang: boolean;
+}
+
+/**
+ * Calcula los margenes laterales necesarios del escenario de lectura.
+ * Si no hay notas sobresaliendo hacia los margenes (ni se esta pegando/arrastrando una),
+ * mantiene leftMargin/rightMargin en 0 para fijar horizontalmente la hoja en tablet/iPad.
+ */
+export function computeStageHorizontalMargins({
+  sheetWidth,
+  secondarySheetWidth,
+  spreadGapPx,
+  hasSecondaryPage,
+  pageNotes,
+  secondaryPageNotes,
+  noteWidth,
+  isInteractiveMarginOpen,
+}: StageMarginParams): StageMarginResult {
+  const safeSheetW = Math.max(1, sheetWidth);
+  const safeSecondaryW = Math.max(1, secondarySheetWidth);
+  const totalSheetsWidth =
+    safeSheetW + (hasSecondaryPage ? spreadGapPx + safeSecondaryW : 0);
+
+  let leftOverhang = 0;
+  let rightOverhang = 0;
+
+  for (const note of pageNotes) {
+    let x = note.xRatio ?? 1.025;
+    if (hasSecondaryPage && x >= 0.98) {
+      x = -((noteWidth + 18) / Math.max(300, safeSheetW));
+    }
+    const left = x * safeSheetW;
+    const right = left + noteWidth;
+    if (left < 0) {
+      leftOverhang = Math.max(leftOverhang, Math.ceil(-left + 12));
+    }
+    if (right > totalSheetsWidth) {
+      rightOverhang = Math.max(rightOverhang, Math.ceil(right - totalSheetsWidth + 12));
+    }
+  }
+
+  if (hasSecondaryPage) {
+    const sheet2Origin = safeSheetW + spreadGapPx;
+    for (const note of secondaryPageNotes) {
+      let x = note.xRatio ?? 1.025;
+      if (x < -0.05) {
+        x = 1.025;
+      }
+      const left = sheet2Origin + x * safeSecondaryW;
+      const right = left + noteWidth;
+      if (left < 0) {
+        leftOverhang = Math.max(leftOverhang, Math.ceil(-left + 12));
+      }
+      if (right > totalSheetsWidth) {
+        rightOverhang = Math.max(
+          rightOverhang,
+          Math.ceil(right - totalSheetsWidth + 12)
+        );
+      }
+    }
+  }
+
+  const interactiveMarginPx = hasSecondaryPage
+    ? Math.max(noteWidth + 24, Math.round(safeSheetW * 0.24))
+    : Math.max(noteWidth + 28, Math.round(safeSheetW * 0.31));
+
+  const leftMargin = isInteractiveMarginOpen
+    ? Math.max(interactiveMarginPx, leftOverhang)
+    : leftOverhang;
+  const rightMargin = isInteractiveMarginOpen
+    ? Math.max(interactiveMarginPx, rightOverhang)
+    : rightOverhang;
+
+  return {
+    leftMargin,
+    rightMargin,
+    hasMarginOverhang: leftOverhang > 0 || rightOverhang > 0,
+  };
+}

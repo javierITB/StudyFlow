@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import {
   Activity,
@@ -44,6 +44,7 @@ import {
   StudySettings,
 } from '../types/studyflow';
 import { formatDurationCompact } from '../lib/diagnosticEngine';
+import { computeStageHorizontalMargins } from '../lib/documentUtils';
 import { formatErrorMessageEs } from '../lib/errorMessages';
 import type { DocxPage } from '../lib/docxParser';
 import type { ParsedPptxPresentation } from '../lib/pptxParser';
@@ -86,7 +87,8 @@ const NOTE_COLORS: Array<{ id: NoteColor; label: string; dotClass: string }> = [
 ];
 
 const NOTE_WIDTH = 212;
-const STAGE_VERT_MARGIN = 28;
+const STAGE_VERT_COMPACT = 10;
+const STAGE_VERT_EXPANDED = 26;
 
 export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   activeDoc,
@@ -145,7 +147,12 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const activeRenderTaskRef = useRef<RenderTask | null>(null);
   const activeSecondaryRenderTaskRef = useRef<RenderTask | null>(null);
   const wasNativeFullscreenRef = useRef<boolean>(false);
-  const lastAutoFittedDocRef = useRef<string | null>(null);
+  const zoomModeRef = useRef<'auto' | 'fit' | 'manual'>('auto');
+  const pendingAnchorSheetLeftRef = useRef<number | null>(null);
+  const [containerSize, setContainerSize] = useState<{
+    innerWidth: number;
+    innerHeight: number;
+  }>({ innerWidth: 0, innerHeight: 0 });
 
   const [zoom, setZoom] = useState<number>(1.0);
   const [viewMode, setViewMode] = useState<'single' | 'double'>('single');
@@ -187,6 +194,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const saveTimersRef = useRef<Map<string, number>>(new Map());
   const dragStateRef = useRef<{
     noteId: string;
+    targetSheetEl: HTMLDivElement | null;
     startX: number;
     startY: number;
     startLeftFromSheetPx: number;
@@ -195,6 +203,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     maxLeftFromSheetPx: number;
     minTopFromSheetPx: number;
     maxTopFromSheetPx: number;
+    noteWidthPx: number;
+    noteHeightPx: number;
     sheetWidthPx: number;
     sheetHeightPx: number;
     currentDx: number;
@@ -461,10 +471,29 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
       const rawDx = ev.clientX - st.startX;
       const rawDy = ev.clientY - st.startY;
-      const minDx = st.minLeftFromSheetPx - st.startLeftFromSheetPx;
-      const maxDx = st.maxLeftFromSheetPx - st.startLeftFromSheetPx;
-      const minDy = st.minTopFromSheetPx - st.startTopFromSheetPx;
-      const maxDy = st.maxTopFromSheetPx - st.startTopFromSheetPx;
+      const liveStageRect = stageRef.current?.getBoundingClientRect();
+      const liveSheetRect = st.targetSheetEl?.getBoundingClientRect();
+      const minLeftBound =
+        liveStageRect && liveSheetRect
+          ? liveStageRect.left + 8 - liveSheetRect.left
+          : st.minLeftFromSheetPx;
+      const maxLeftBound =
+        liveStageRect && liveSheetRect
+          ? liveStageRect.right - st.noteWidthPx - 8 - liveSheetRect.left
+          : st.maxLeftFromSheetPx;
+      const minTopBound =
+        liveStageRect && liveSheetRect
+          ? liveStageRect.top + 8 - liveSheetRect.top
+          : st.minTopFromSheetPx;
+      const maxTopBound =
+        liveStageRect && liveSheetRect
+          ? liveStageRect.bottom - st.noteHeightPx - 8 - liveSheetRect.top
+          : st.maxTopFromSheetPx;
+
+      const minDx = minLeftBound - st.startLeftFromSheetPx;
+      const maxDx = maxLeftBound - st.startLeftFromSheetPx;
+      const minDy = minTopBound - st.startTopFromSheetPx;
+      const maxDy = maxTopBound - st.startTopFromSheetPx;
 
       st.currentDx = Math.max(minDx, Math.min(maxDx, rawDx));
       st.currentDy = Math.max(minDy, Math.min(maxDy, rawDy));
@@ -545,9 +574,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     const noteRect = noteEl.getBoundingClientRect();
 
     noteEl.style.willChange = 'transform';
+    pendingAnchorSheetLeftRef.current = sheetRect.left;
 
     dragStateRef.current = {
       noteId,
+      targetSheetEl: sheet,
       startX: e.clientX,
       startY: e.clientY,
       startLeftFromSheetPx: noteRect.left - sheetRect.left,
@@ -556,6 +587,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       maxLeftFromSheetPx: stageRect.right - noteRect.width - 8 - sheetRect.left,
       minTopFromSheetPx: stageRect.top + 8 - sheetRect.top,
       maxTopFromSheetPx: stageRect.bottom - noteRect.height - 8 - sheetRect.top,
+      noteWidthPx: noteRect.width,
+      noteHeightPx: noteRect.height,
       sheetWidthPx: sheetRect.width,
       sheetHeightPx: sheetRect.height,
       currentDx: 0,
@@ -638,19 +671,102 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const spreadGapPx = hasSecondaryPage ? 16 : 0;
   const totalSheetsWidth =
     sheetWidth + (hasSecondaryPage ? spreadGapPx + secondarySheetWidth : 0);
-  const stageSideMargin = hasSecondaryPage
-    ? Math.max(190, Math.round(sheetWidth * 0.24))
-    : Math.max(240, Math.round(sheetWidth * 0.31));
+  const isInteractiveMarginOpen = stickyMode || Boolean(draggingNoteId);
+  const {
+    leftMargin: stageLeftMargin,
+    rightMargin: stageRightMargin,
+    hasMarginOverhang,
+  } = computeStageHorizontalMargins({
+    sheetWidth,
+    secondarySheetWidth,
+    spreadGapPx,
+    hasSecondaryPage,
+    pageNotes,
+    secondaryPageNotes,
+    noteWidth: NOTE_WIDTH,
+    isInteractiveMarginOpen,
+  });
+
+  const stageTopMargin = hasSecondaryPage
+    ? STAGE_VERT_EXPANDED
+    : isInteractiveMarginOpen
+      ? STAGE_VERT_EXPANDED
+      : STAGE_VERT_COMPACT;
+  const stageBottomMargin = isInteractiveMarginOpen
+    ? STAGE_VERT_EXPANDED
+    : STAGE_VERT_COMPACT;
+  const stageWidth = totalSheetsWidth + stageLeftMargin + stageRightMargin;
   const stageMinHeight =
     Math.max(sheetMinHeight, hasSecondaryPage ? secondarySheetMinHeight : 0) +
-    STAGE_VERT_MARGIN * 2;
+    stageTopMargin +
+    stageBottomMargin;
 
-  // Centrar horizontalmente la hoja (o doble hoja) en el viewport al abrir o cambiar zoom
+  const fitsHorizontally =
+    containerSize.innerWidth <= 0 || stageWidth <= containerSize.innerWidth + 2;
+  const lockHorizontalScroll =
+    !hasMarginOverhang && !isInteractiveMarginOpen && fitsHorizontally;
+
+  // Medir el viewport útil real del visor (tablet, sidebar colapsada, pantalla completa)
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container || !activeDoc || isLoadingBuffer || isParsingDoc) return;
+    if (!container) return;
+
+    const measure = () => {
+      const cs = window.getComputedStyle(container);
+      const padX =
+        (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      const padY =
+        (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      const nextInnerWidth = Math.max(240, Math.floor(container.clientWidth - padX - 8));
+      const nextInnerHeight = Math.max(220, Math.floor(container.clientHeight - padY));
+      setContainerSize((prev) =>
+        prev.innerWidth === nextInnerWidth && prev.innerHeight === nextInnerHeight
+          ? prev
+          : { innerWidth: nextInnerWidth, innerHeight: nextInnerHeight }
+      );
+    };
+
+    measure();
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(measure);
+      observer.observe(container);
+    }
+    window.addEventListener('resize', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [activeDoc?.id, isFullscreen]);
+
+  // Evitar salto horizontal cuando se abren los márgenes al arrastrar o activar "Pegar nota"
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    const sheetEl = sheetRef.current;
+    if (pendingAnchorSheetLeftRef.current === null || !container || !sheetEl) {
+      pendingAnchorSheetLeftRef.current = null;
+      return;
+    }
+    const newLeft = sheetEl.getBoundingClientRect().left;
+    const delta = newLeft - pendingAnchorSheetLeftRef.current;
+    pendingAnchorSheetLeftRef.current = null;
+    if (Math.abs(delta) > 0.5 && container.scrollWidth > container.clientWidth) {
+      container.scrollLeft = Math.max(0, container.scrollLeft + delta);
+    }
+  }, [isInteractiveMarginOpen]);
+
+  // Centrar o fijar horizontalmente la hoja en el viewport según haya márgenes/zoom
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !activeDoc || isLoadingBuffer || isParsingDoc || draggingNoteId) {
+      return;
+    }
     const raf = window.requestAnimationFrame(() => {
-      if (container.scrollWidth > container.clientWidth) {
+      if (lockHorizontalScroll) {
+        if (container.scrollLeft !== 0) {
+          container.scrollLeft = 0;
+        }
+      } else if (container.scrollWidth > container.clientWidth) {
         container.scrollLeft = Math.max(
           0,
           (container.scrollWidth - container.clientWidth) / 2
@@ -658,7 +774,16 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       }
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [activeDoc?.id, zoom, totalSheetsWidth, viewMode, isLoadingBuffer, isParsingDoc]);
+  }, [
+    activeDoc?.id,
+    zoom,
+    stageWidth,
+    viewMode,
+    isLoadingBuffer,
+    isParsingDoc,
+    lockHorizontalScroll,
+    draggingNoteId,
+  ]);
 
   const computeNextMarginCoords = (
     existingNotes: StickyNoteRecord[],
@@ -725,35 +850,46 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     onNotify('Nota movida al margen', 'info');
   };
 
+  const getInnerContainerWidth = (container: HTMLElement): number => {
+    const cs = window.getComputedStyle(container);
+    const padX =
+      (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    return Math.max(240, Math.floor(container.clientWidth - padX - 8));
+  };
+
   const computeFitZoom = async (
     doc: DocumentRecord,
     pdf: PDFDocumentProxy | null,
-    containerWidth: number,
+    innerAvailableWidth: number,
     pageNum: number,
     isDoubleSpread = false
   ): Promise<number> => {
-    const availableWidth = Math.max(280, containerWidth - 40);
+    const availableWidth = Math.max(240, innerAvailableWidth);
     const targetSheetWidth = isDoubleSpread
-      ? Math.max(220, Math.floor((availableWidth - 28) / 2))
+      ? Math.max(180, Math.floor((availableWidth - 18) / 2))
       : availableWidth;
+    const clampFloor3 = (val: number, minZ: number, maxZ: number) =>
+      Math.max(minZ, Math.min(maxZ, Math.floor(val * 1000) / 1000));
+
     if (doc.fileType === 'pdf' && pdf) {
       const page = await pdf.getPage(Math.min(Math.max(1, pageNum), pdf.numPages));
       const vp = page.getViewport({ scale: 1.0 });
-      return Math.max(0.35, Math.min(2.5, targetSheetWidth / vp.width));
+      return clampFloor3(targetSheetWidth / vp.width, 0.25, 2.5);
     }
     if (doc.fileType === 'pptx') {
-      return Math.max(0.35, Math.min(2.2, targetSheetWidth / 860));
+      return clampFloor3(targetSheetWidth / 860, 0.25, 2.2);
     }
-    return Math.max(0.35, Math.min(2.0, targetSheetWidth / 794));
+    return clampFloor3(targetSheetWidth / 794, 0.25, 2.0);
   };
 
   const handleFitToWidth = async () => {
     const container = scrollContainerRef.current;
     if (!container || !activeDoc) return;
+    zoomModeRef.current = 'fit';
     const nextZoom = await computeFitZoom(
       activeDoc,
       pdfProxy,
-      container.clientWidth,
+      getInnerContainerWidth(container),
       currentPage,
       hasSecondaryPage
     );
@@ -762,31 +898,21 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   const handleToggleViewMode = async () => {
     const nextMode: 'single' | 'double' = viewMode === 'single' ? 'double' : 'single';
+    zoomModeRef.current = 'auto';
     setViewMode(nextMode);
     const container = scrollContainerRef.current;
     if (!container || !activeDoc) return;
 
-    if (nextMode === 'double' && totalPages > 1) {
-      const fit = await computeFitZoom(
-        activeDoc,
-        pdfProxy,
-        container.clientWidth,
-        currentPage,
-        true
-      );
-      if (sheetWidth * 2 + 56 > container.clientWidth || zoom > fit) {
-        setZoom(fit);
-      }
-    } else if (nextMode === 'single' && zoom < 0.72) {
-      const fit = await computeFitZoom(
-        activeDoc,
-        pdfProxy,
-        container.clientWidth,
-        currentPage,
-        false
-      );
-      setZoom(Math.min(1.0, fit));
-    }
+    const innerW = getInnerContainerWidth(container);
+    const willShowSecondary = nextMode === 'double' && currentPage < totalPages;
+    const fit = await computeFitZoom(
+      activeDoc,
+      pdfProxy,
+      innerW,
+      currentPage,
+      willShowSecondary
+    );
+    setZoom(Math.min(1.0, fit));
   };
 
   const stepPage = (delta: number) => {
@@ -809,7 +935,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   };
 
   const adjustZoom = (delta: number) => {
-    setZoom((z) => Math.min(2.5, Math.max(0.35, Number((z + delta).toFixed(2)))));
+    zoomModeRef.current = 'manual';
+    setZoom((z) => Math.min(2.5, Math.max(0.25, Number((z + delta).toFixed(2)))));
   };
 
   const handleToggleStickyMode = () => {
@@ -817,6 +944,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       onNotify('Abre un documento primero para fijar notas', 'warning');
       return;
     }
+    pendingAnchorSheetLeftRef.current = sheetRef.current?.getBoundingClientRect().left ?? null;
     const next = !stickyMode;
     setStickyMode(next);
     if (next) {
@@ -915,10 +1043,15 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     onChangePage,
   ]);
 
-  // En tablet/iPad o ventanas angostas, ajustar el ancho automaticamente al abrir un documento
+  useEffect(() => {
+    zoomModeRef.current = 'auto';
+  }, [activeDoc?.id]);
+
+  // Ajustar automáticamente el ancho al abrir, girar tablet o colapsar sidebar (salvo zoom manual)
   useEffect(() => {
     if (!activeDoc || isLoadingBuffer || isParsingDoc) return;
-    if (lastAutoFittedDocRef.current === activeDoc.id) return;
+    if (zoomModeRef.current === 'manual') return;
+    if (containerSize.innerWidth <= 0) return;
 
     const isContentReady =
       (activeDoc.fileType === 'pdf' && Boolean(pdfProxy)) ||
@@ -926,13 +1059,22 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       (activeDoc.fileType === 'pptx' && Boolean(pptxData));
     if (!isContentReady) return;
 
-    lastAutoFittedDocRef.current = activeDoc.id;
-    const container = scrollContainerRef.current;
-    if (container && container.clientWidth > 0 && container.clientWidth < 860) {
-      void computeFitZoom(activeDoc, pdfProxy, container.clientWidth, currentPage).then(
-        (z) => setZoom(z)
-      );
-    }
+    let cancelled = false;
+    void computeFitZoom(
+      activeDoc,
+      pdfProxy,
+      containerSize.innerWidth,
+      currentPage,
+      hasSecondaryPage
+    ).then((fit) => {
+      if (cancelled) return;
+      const target = zoomModeRef.current === 'fit' ? fit : Math.min(1.0, fit);
+      setZoom((prev) => (Math.abs(target - prev) > 0.015 ? target : prev));
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     activeDoc,
     pdfProxy,
@@ -941,6 +1083,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     isLoadingBuffer,
     isParsingDoc,
     currentPage,
+    hasSecondaryPage,
+    containerSize.innerWidth,
   ]);
 
   const handleStageClick = async (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1683,7 +1827,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
           <div
             ref={scrollContainerRef}
-            className="flex-1 overflow-auto p-3 sm:p-4 pb-24 flex flex-col items-start sf-env-canvas"
+            className={`flex-1 flex flex-col sf-env-canvas ${
+              lockHorizontalScroll
+                ? 'overflow-y-auto overflow-x-hidden touch-pan-y overscroll-x-none items-center'
+                : 'overflow-auto items-start'
+            } ${isFullscreen ? 'p-3 sm:p-4 pb-24' : 'p-2 sm:p-4 pb-5'}`}
           >
           {!activeDoc ? (
             <div className="m-auto text-center py-20 px-4">
@@ -1712,9 +1860,12 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               ref={stageRef}
               onClick={(e) => void handleStageClick(e)}
               style={{
-                width: `${totalSheetsWidth + stageSideMargin * 2}px`,
+                width: `${stageWidth}px`,
                 minHeight: `${stageMinHeight}px`,
-                padding: `${STAGE_VERT_MARGIN}px ${stageSideMargin}px`,
+                paddingTop: `${stageTopMargin}px`,
+                paddingBottom: `${stageBottomMargin}px`,
+                paddingLeft: `${stageLeftMargin}px`,
+                paddingRight: `${stageRightMargin}px`,
               }}
               className={`mx-auto relative flex flex-col items-center gap-4 ${
                 stickyMode ? 'cursor-crosshair-mode' : ''
@@ -1723,32 +1874,36 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               {/* Guías sutiles de márgenes libres mientras colocas o arrastras un post-it */}
               {(stickyMode || draggingNoteId) && (
                 <>
-                  <div
-                    style={{
-                      left: '12px',
-                      top: `${STAGE_VERT_MARGIN}px`,
-                      width: `${stageSideMargin - 24}px`,
-                      height: `${Math.max(sheetMinHeight, hasSecondaryPage ? secondarySheetMinHeight : 0)}px`,
-                    }}
-                    className="pointer-events-none absolute rounded-2xl border border-dashed border-indigo-500/35 bg-indigo-500/[0.03] flex items-start justify-center pt-4"
-                  >
-                    <span className="text-[10px] font-medium text-indigo-300/75 uppercase tracking-wider">
-                      Margen izquierdo libre
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      right: '12px',
-                      top: `${STAGE_VERT_MARGIN}px`,
-                      width: `${stageSideMargin - 24}px`,
-                      height: `${Math.max(sheetMinHeight, hasSecondaryPage ? secondarySheetMinHeight : 0)}px`,
-                    }}
-                    className="pointer-events-none absolute rounded-2xl border border-dashed border-indigo-500/35 bg-indigo-500/[0.03] flex items-start justify-center pt-4"
-                  >
-                    <span className="text-[10px] font-medium text-indigo-300/75 uppercase tracking-wider">
-                      Margen derecho libre
-                    </span>
-                  </div>
+                  {stageLeftMargin >= 40 && (
+                    <div
+                      style={{
+                        left: '10px',
+                        top: `${stageTopMargin}px`,
+                        width: `${stageLeftMargin - 20}px`,
+                        height: `${Math.max(sheetMinHeight, hasSecondaryPage ? secondarySheetMinHeight : 0)}px`,
+                      }}
+                      className="pointer-events-none absolute rounded-2xl border border-dashed border-indigo-500/35 bg-indigo-500/[0.03] flex items-start justify-center pt-4"
+                    >
+                      <span className="text-[10px] font-medium text-indigo-300/75 uppercase tracking-wider">
+                        Margen izquierdo libre
+                      </span>
+                    </div>
+                  )}
+                  {stageRightMargin >= 40 && (
+                    <div
+                      style={{
+                        right: '10px',
+                        top: `${stageTopMargin}px`,
+                        width: `${stageRightMargin - 20}px`,
+                        height: `${Math.max(sheetMinHeight, hasSecondaryPage ? secondarySheetMinHeight : 0)}px`,
+                      }}
+                      className="pointer-events-none absolute rounded-2xl border border-dashed border-indigo-500/35 bg-indigo-500/[0.03] flex items-start justify-center pt-4"
+                    >
+                      <span className="text-[10px] font-medium text-indigo-300/75 uppercase tracking-wider">
+                        Margen derecho libre
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
 
