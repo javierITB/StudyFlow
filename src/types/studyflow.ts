@@ -106,6 +106,8 @@ export type UiRadiusId = 'modern' | 'sharp' | 'soft';
 
 export type UiScaleId = 'compact' | 'normal' | 'comfortable';
 
+export type LayoutStyleId = 'islands' | 'classic';
+
 export interface AppearanceSettings {
   themeId: ThemePresetId;
   accentId: AccentColorId;
@@ -117,6 +119,7 @@ export interface AppearanceSettings {
   fontFamily: FontChoiceId;
   uiRadius: UiRadiusId;
   uiScale: UiScaleId;
+  layoutStyle?: LayoutStyleId;
 }
 
 export interface StudySettings {

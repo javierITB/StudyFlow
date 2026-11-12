@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
+  BookOpen,
   Check,
   ChevronDown,
   ChevronRight,
@@ -206,11 +207,10 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
             e.dataTransfer.setData('application/x-studyflow-doc', doc.id);
             e.dataTransfer.effectAllowed = 'move';
           }}
-          className={`group relative rounded-lg border px-2.5 py-2 transition-all ${
-            isActive
+          className={`group relative rounded-lg border px-2.5 py-2 transition-all ${isActive
               ? 'bg-indigo-500/20 border-indigo-400/90 ring-1 ring-indigo-500/45 shadow-sm'
               : 'bg-slate-900/85 border-indigo-500/20 hover:border-indigo-400/60 hover:bg-indigo-500/5'
-          }`}
+            }`}
         >
           <div className="flex items-center gap-2">
             <span
@@ -305,11 +305,10 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                 setMoveMenuDocId(null);
                 void onMoveDocumentToFolder(doc.id, null);
               }}
-              className={`w-full text-left px-2 py-1 rounded flex items-center justify-between ${
-                !doc.folderId
+              className={`w-full text-left px-2 py-1 rounded flex items-center justify-between ${!doc.folderId
                   ? 'bg-slate-800 text-white'
                   : 'text-slate-300 hover:bg-slate-800/70'
-              }`}
+                }`}
             >
               <span>Sin carpeta</span>
               {!doc.folderId && <Check className="w-3 h-3 text-indigo-400" />}
@@ -322,17 +321,15 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                   setMoveMenuDocId(null);
                   void onMoveDocumentToFolder(doc.id, f.id);
                 }}
-                className={`w-full text-left px-2 py-1 rounded flex items-center justify-between ${
-                  doc.folderId === f.id
+                className={`w-full text-left px-2 py-1 rounded flex items-center justify-between ${doc.folderId === f.id
                     ? 'bg-indigo-600/30 text-white'
                     : 'text-slate-300 hover:bg-slate-800/70'
-                }`}
+                  }`}
               >
                 <span className="flex items-center gap-1.5 truncate">
                   <span
-                    className={`w-2 h-2 rounded-full ${
-                      FOLDER_COLOR_CLASSES[f.color || 'indigo'].dot
-                    }`}
+                    className={`w-2 h-2 rounded-full ${FOLDER_COLOR_CLASSES[f.color || 'indigo'].dot
+                      }`}
                   />
                   <span className="truncate">{f.name}</span>
                 </span>
@@ -347,35 +344,18 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
 
   return (
     <aside className="w-full h-full sf-sidebar-chrome backdrop-blur-md flex flex-col overflow-hidden">
-      {/* Switch Compacto Archivos | Ruta del Plan */}
-      <div className="px-3 pt-3 pb-2 border-b border-indigo-500/25 bg-slate-900/60 flex items-center gap-2">
-        <div className="flex-1 grid grid-cols-2 gap-1 bg-slate-950/80 p-1 rounded-xl border border-indigo-500/30">
-          <button
-            type="button"
-            onClick={() => setSidebarTab('files')}
-            className={`py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-              sidebarTab === 'files'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Archivos ({documents.length})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setSidebarTab('route')}
-            className={`py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-              sidebarTab === 'route'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Route className="w-3.5 h-3.5" />
-            <span>
-              Ruta ({completedStudyStepsCount}/{studySteps.length})
+      {/* Cabecera superior de marca integrada (alineada con la altura del Navbar) */}
+      <div className="h-12 xl:h-14 sf-header-chrome border-b border-indigo-500/20 px-3 flex items-center justify-between gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 xl:w-9 xl:h-9 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 flex-shrink-0">
+            <BookOpen className="w-4 h-4 xl:w-5 xl:h-5 text-white" />
+          </div>
+          <span className="text-sm xl:text-base font-bold tracking-tight text-white flex items-center gap-1.5 whitespace-nowrap truncate">
+            <span>StudyFlow</span>
+            <span className="inline-flex text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+              2.0
             </span>
-          </button>
+          </span>
         </div>
         {onCloseDrawer && (
           <button
@@ -388,6 +368,36 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
             <PanelLeftClose className="w-4 h-4" />
           </button>
         )}
+      </div>
+
+      {/* Switch Compacto Archivos | Ruta del Plan */}
+      <div className="px-3 pt-2.5 pb-2 border-b border-indigo-500/25 bg-slate-900/60 flex items-center gap-2">
+        <div className="flex-1 grid grid-cols-2 gap-1 bg-slate-950/80 p-1 rounded-xl border border-indigo-500/30">
+          <button
+            type="button"
+            onClick={() => setSidebarTab('files')}
+            className={`py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${sidebarTab === 'files'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+              }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Archivos ({documents.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSidebarTab('route')}
+            className={`py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${sidebarTab === 'route'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+              }`}
+          >
+            <Route className="w-3.5 h-3.5" />
+            <span>
+              Ruta ({completedStudyStepsCount}/{studySteps.length})
+            </span>
+          </button>
+        </div>
       </div>
 
       {sidebarTab === 'files' ? (
@@ -418,11 +428,10 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                   void onUploadFiles(e.dataTransfer.files, null);
                 }
               }}
-              className={`border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-colors ${
-                isDragOverUpload
+              className={`border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-colors ${isDragOverUpload
                   ? 'border-indigo-400 bg-indigo-500/15'
                   : 'border-indigo-500/35 hover:border-indigo-400 bg-indigo-500/[0.04] hover:bg-indigo-500/10'
-              }`}
+                }`}
             >
               <input
                 ref={fileInputRef}
@@ -496,9 +505,8 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                         key={c}
                         type="button"
                         onClick={() => setNewFolderColor(c)}
-                        className={`w-4 h-4 rounded-full ${FOLDER_COLOR_CLASSES[c].dot} ${
-                          newFolderColor === c ? 'ring-2 ring-white scale-110' : 'opacity-65'
-                        }`}
+                        className={`w-4 h-4 rounded-full ${FOLDER_COLOR_CLASSES[c].dot} ${newFolderColor === c ? 'ring-2 ring-white scale-110' : 'opacity-65'
+                          }`}
                       />
                     ))}
                   </div>
@@ -564,16 +572,28 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                       onDrop={(e) => void handleFolderDrop(e, folder.id)}
                       className="group/folder"
                     >
-                      {/* Pestaña superior estética del folder */}
-                      <div className="flex items-end pl-1">
+                      {/* Pestaña superior estética del folder integrada */}
+                      <div
+                        onClick={() => toggleFolderExpanded(folder.id)}
+                        className="flex items-end cursor-pointer select-none"
+                      >
                         <div
-                          className={`h-1.5 w-16 rounded-t-md ${colorCfg.tabBg} opacity-90`}
-                        />
+                          className={`h-2.5 w-20 rounded-t-lg border-t border-l border-r -mb-[1px] relative z-10 flex items-center px-2 transition-all ${
+                            isDragTarget
+                              ? 'border-indigo-400 bg-indigo-500/20'
+                              : `${colorCfg.border} ${colorCfg.headerBg}`
+                          }`}
+                          style={{ backgroundColor: 'rgb(var(--sf-bg-panel))' }}
+                        >
+                          <div
+                            className={`h-1 w-full rounded-full ${colorCfg.tabBg} opacity-90`}
+                          />
+                        </div>
                       </div>
 
                       {/* Cuerpo principal del Folder */}
                       <div
-                        className={`rounded-xl rounded-tl-none border transition-all overflow-hidden ${
+                        className={`rounded-xl !rounded-tl-none border transition-all overflow-hidden relative z-0 ${
                           isDragTarget
                             ? 'border-indigo-400 bg-indigo-500/15 ring-2 ring-indigo-500/40'
                             : `${colorCfg.border} ${colorCfg.headerBg}`
@@ -649,58 +669,68 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                           </div>
                         </div>
 
-                        {/* Barra de carga/avance del folder */}
-                        {folderPages > 0 && (
-                          <div className="px-2.5 pb-2">
-                            <div className="w-full h-1 bg-slate-950/70 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full ${colorCfg.dot} transition-all`}
-                                style={{ width: `${folderPct}%` }}
-                              />
-                            </div>
-                          </div>
-                        )}
+            {/* Barra de carga/avance del folder */}
+            {folderPages > 0 && (
+              <div className="px-2.5 pb-2">
+                <div className="w-full h-1 bg-slate-950/70 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full ${colorCfg.dot} transition-all`}
+                    style={{ width: `${folderPct}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
-                        {/* Hojas (documentos) apiladas dentro del folder */}
-                        {!isCollapsed && (
-                          <div className="px-2.5 pb-2.5 pt-1 bg-slate-950/45 border-t border-slate-800/70">
-                            {folderDocs.length === 0 ? (
-                              <div className="py-3 text-center text-[11px] text-slate-500 border border-dashed border-slate-800 rounded-lg">
-                                Arrastra hojas aquí para agrupar en {folder.name}
-                              </div>
-                            ) : (
-                              <div
-                                className={`pl-2.5 border-l-2 ${colorCfg.guideBorder} space-y-1.5`}
-                              >
-                                {folderDocs.map((doc) => renderDocumentLeaf(doc))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
+            {/* Hojas (documentos) apiladas dentro del folder */}
+            {!isCollapsed && (
+              <div className="px-2.5 pb-2.5 pt-1 bg-slate-950/45 border-t border-slate-800/70">
+                {folderDocs.length === 0 ? (
+                  <div className="py-3 text-center text-[11px] text-slate-500 border border-dashed border-slate-800 rounded-lg">
+                    Arrastra hojas aquí para agrupar en {folder.name}
+                  </div>
+                ) : (
+                  <div
+                    className={`pl-2.5 border-l-2 ${colorCfg.guideBorder} space-y-1.5`}
+                  >
+                    {folderDocs.map((doc) => renderDocumentLeaf(doc))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      );
                 })}
 
-                {/* Carpeta de materiales sueltos / sin asignar */}
-                {(unassignedDocs.length > 0 || folders.length > 0) && (
-                  <div
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      setDragOverFolderId('unassigned');
-                    }}
-                    onDragLeave={() => setDragOverFolderId(null)}
-                    onDrop={(e) => void handleFolderDrop(e, null)}
-                  >
-                    <div className="flex items-end pl-1">
-                      <div className="h-1.5 w-14 rounded-t-md bg-indigo-500/55" />
-                    </div>
-                    <div
-                      className={`rounded-xl rounded-tl-none border transition-all overflow-hidden ${
-                        dragOverFolderId === 'unassigned'
-                          ? 'border-indigo-400 bg-indigo-500/15'
-                          : 'border-indigo-500/30 bg-indigo-500/[0.05]'
-                      }`}
+      {/* Carpeta de materiales sueltos / sin asignar */}
+      {(unassignedDocs.length > 0 || folders.length > 0) && (
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOverFolderId('unassigned');
+          }}
+          onDragLeave={() => setDragOverFolderId(null)}
+          onDrop={(e) => void handleFolderDrop(e, null)}
+        >
+            {/* Pestaña superior estética integrada */}
+            <div
+              onClick={() => toggleFolderExpanded('unassigned')}
+              className="flex items-end cursor-pointer select-none"
+            >
+              <div
+                className={`h-2.5 w-16 rounded-t-lg border-t border-l border-r -mb-[1px] relative z-10 flex items-center px-2 transition-all ${dragOverFolderId === 'unassigned'
+                    ? 'border-indigo-400 bg-indigo-500/20'
+                    : 'border-indigo-500/35 bg-indigo-500/10'
+                  }`}
+                style={{ backgroundColor: 'rgb(var(--sf-bg-panel))' }}
+              >
+                <div className="h-1 w-full rounded-full bg-indigo-400/70" />
+              </div>
+            </div>
+            <div
+                    ? 'border-indigo-400 bg-indigo-500/15'
+                    : 'border-indigo-500/30 bg-indigo-500/[0.05]'
+                  }`}
                     >
                       <div
                         onClick={() => toggleFolderExpanded('unassigned')}
@@ -746,10 +776,24 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                 {/* Sesiones colaborativas compartidas conmigo */}
                 {sharedDocuments.length > 0 && (
                   <div>
-                    <div className="flex items-end pl-1">
-                      <div className="h-1.5 w-16 rounded-t-md bg-emerald-500/60" />
+                    {/* Pestaña superior estética integrada */}
+                    <div
+                      onClick={() =>
+                        setCollapsedFolders((prev) => ({
+                          ...prev,
+                          shared_with_me: !prev.shared_with_me,
+                        }))
+                      }
+                      className="flex items-end cursor-pointer select-none"
+                    >
+                      <div
+                        className="h-2.5 w-20 rounded-t-lg border-t border-l border-r border-emerald-500/40 -mb-[1px] relative z-10 flex items-center px-2"
+                        style={{ backgroundColor: 'rgb(var(--sf-bg-panel))' }}
+                      >
+                        <div className="h-1 w-full rounded-full bg-emerald-400/80" />
+                      </div>
                     </div>
-                    <div className="rounded-xl rounded-tl-none border border-emerald-500/30 bg-emerald-950/15 overflow-hidden">
+                    <div className="rounded-xl !rounded-tl-none border border-emerald-500/30 bg-emerald-950/15 overflow-hidden relative z-0">
                       <div
                         onClick={() =>
                           setCollapsedFolders((prev) => ({
@@ -793,9 +837,9 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                                 }}
                                 className={`p-2 rounded-lg border cursor-pointer transition-all ${
                                   isActive
-                                    ? 'bg-emerald-500/15 border-emerald-400/60'
-                                    : 'bg-slate-900/80 border-slate-800 hover:border-emerald-500/40'
-                                }`}
+                ? 'bg-emerald-500/15 border-emerald-400/60'
+                : 'bg-slate-900/80 border-slate-800 hover:border-emerald-500/40'
+              }`}
                               >
                                 <div className="flex items-center justify-between gap-1.5">
                                   <div className="min-w-0 flex items-center gap-1.5">
@@ -847,36 +891,35 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
               <div
                 className="h-full bg-indigo-500 rounded-full transition-all"
                 style={{
-                  width: `${
-                    studySteps.length > 0
-                      ? Math.round((completedStudyStepsCount / studySteps.length) * 100)
-                      : 0
-                  }%`,
-                }}
-              />
-            </div>
-            <p className="text-[10px] text-slate-400 leading-snug">
-              {planResult.recommendation}
-            </p>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-3">
-            <RouteTimeline
-              planResult={planResult}
-              activeRouteStepId={activeRouteStepId}
-              compact
-              onStartRouteStep={onStartRouteStep}
-              onToggleStepCompleted={onToggleStepCompleted}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Estado de almacenamiento */}
-      <div className="p-3 border-t border-indigo-500/25 bg-slate-900/90 flex items-center justify-between text-[11px] text-slate-400">
-        <span>Almacenamiento: IndexedDB</span>
-        <span className="text-indigo-300 font-medium">{syncStatusLabel}</span>
+                  width: `${studySteps.length > 0
+                ? Math.round((completedStudyStepsCount / studySteps.length) * 100)
+                : 0
+              }%`,
+          }}
+        />
       </div>
-    </aside>
+      <p className="text-[10px] text-slate-400 leading-snug">
+        {planResult.recommendation}
+      </p>
+    </div>
+
+    <div className="flex-1 overflow-y-auto p-3">
+      <RouteTimeline
+        planResult={planResult}
+        activeRouteStepId={activeRouteStepId}
+        compact
+        onStartRouteStep={onStartRouteStep}
+        onToggleStepCompleted={onToggleStepCompleted}
+      />
+    </div>
+  </div>
+)}
+
+{/* Estado de almacenamiento */ }
+<div className="p-3 border-t border-indigo-500/25 bg-slate-900/90 flex items-center justify-between text-[11px] text-slate-400">
+  <span>Almacenamiento: IndexedDB</span>
+  <span className="text-indigo-300 font-medium">{syncStatusLabel}</span>
+</div>
+    </aside >
   );
 };

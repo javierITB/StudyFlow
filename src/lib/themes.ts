@@ -19,6 +19,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   fontFamily: 'inter',
   uiRadius: 'modern',
   uiScale: 'normal',
+  layoutStyle: 'islands',
 };
 
 export interface ThemePaletteDefinition {

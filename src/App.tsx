@@ -259,138 +259,163 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
         : 'Nube activa'
     : 'Modo Local';
 
+  const layoutStyle = studySettings.appearance?.layoutStyle || 'islands';
+
   return (
-    <div className="h-[100dvh] flex flex-col overflow-hidden bg-slate-950 text-slate-100">
-      <Navbar
-        currentModule={currentModule}
-        onSwitchModule={setCurrentModule}
-        settings={studySettings}
-        onToggleAudio={() => void onToggleAudio()}
-        user={user}
-        syncStatus={syncStatus}
-        onOpenAccountModal={onOpenAccountModal}
-        onOpenFriendsModal={onOpenFriendsModal}
-        onOpenAppearanceModal={onOpenAppearanceModal}
-        onOpenTutorial={onOpenTutorial}
-        notificationsSlot={notificationsSlot}
-      />
-
-      <main className="flex-1 overflow-hidden relative">
-        {currentModule === 'docs' && (
-          <div className="h-full flex overflow-hidden relative">
-            {sidebarOpen && (
-              <div
-                className="fixed inset-0 top-12 xl:top-14 bg-slate-950/60 backdrop-blur-[1px] z-20 lg:hidden"
-                onClick={() => onSetSidebarOpen(false)}
-              />
-            )}
+    <div className="h-[100dvh] flex overflow-hidden bg-slate-950 text-slate-100 relative">
+      {currentModule === 'docs' && (
+        <>
+          {sidebarOpen && (
             <div
-              className={
-                sidebarOpen
-                  ? 'absolute inset-y-0 left-0 z-30 w-80 sm:w-[21rem] max-w-[88vw] shadow-2xl lg:static lg:z-auto lg:w-72 xl:w-80 2xl:w-96 lg:shadow-none flex-shrink-0 h-full transition-all duration-200'
-                  : 'hidden lg:block lg:w-0 lg:overflow-hidden flex-shrink-0 h-full transition-all duration-200'
-              }
-            >
-              <DocumentSidebar
-                folders={folders}
-                documents={documents}
-                sharedDocuments={sharedDocuments}
-                activeDocId={activeDocId}
-                speedMinPerPage={studySettings.speedMinPerPage}
-                isUploading={isUploading}
-                syncStatusLabel={syncStatusLabel}
-                planResult={planResult}
-                activeRouteStepId={activeRouteStep?.id || null}
-                onCreateFolder={onCreateFolder}
-                onDeleteFolder={onDeleteFolder}
-                onUploadFiles={onUploadFiles}
-                onOpenDocument={(id) => {
-                  void onOpenDocument(id);
-                  if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-                    onSetSidebarOpen(false);
-                  }
-                }}
-                onMoveDocumentToFolder={onMoveDocumentToFolder}
-                onDeleteDocument={onDeleteDocument}
-                onShareDocument={user ? onShareDocument : undefined}
-                onStartRouteStep={(step, next) =>
-                  void handleStartRouteStepInViewer(step, next)
-                }
-                onToggleStepCompleted={onToggleStepCompleted}
-                onOpenPlannerTab={() => setCurrentModule('pomodoro')}
-                onCloseDrawer={() => onSetSidebarOpen(false)}
-              />
-            </div>
-
-            <DocumentViewer
-              activeDoc={activeDoc}
-              documentBuffer={activeBuffer}
-              isLoadingBuffer={isLoadingBuffer}
-              notes={notes}
-              studySettings={studySettings}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-[1px] z-40 lg:hidden"
+              onClick={() => onSetSidebarOpen(false)}
+            />
+          )}
+          <div
+            className={
+              sidebarOpen
+                ? 'fixed inset-y-0 left-0 z-50 w-80 sm:w-[21rem] max-w-[88vw] shadow-2xl lg:static lg:z-auto lg:w-72 xl:w-80 2xl:w-96 lg:shadow-none flex-shrink-0 h-full transition-all duration-200'
+                : 'hidden lg:block lg:w-0 lg:overflow-hidden flex-shrink-0 h-full transition-all duration-200'
+            }
+          >
+            <DocumentSidebar
+              folders={folders}
+              documents={documents}
+              sharedDocuments={sharedDocuments}
+              activeDocId={activeDocId}
+              speedMinPerPage={studySettings.speedMinPerPage}
+              isUploading={isUploading}
+              syncStatusLabel={syncStatusLabel}
               planResult={planResult}
-              diagnosticData={diagnosticData}
-              highlightedNoteId={highlightedNoteId}
-              onChangePage={(docId, p) => void onChangePage(docId, p)}
-              onOpenDocumentAtPage={(docId, p) => void onOpenDocument(docId, p)}
+              activeRouteStepId={activeRouteStep?.id || null}
+              onCreateFolder={onCreateFolder}
+              onDeleteFolder={onDeleteFolder}
+              onUploadFiles={onUploadFiles}
+              onOpenDocument={(id) => {
+                void onOpenDocument(id);
+                if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                  onSetSidebarOpen(false);
+                }
+              }}
+              onMoveDocumentToFolder={onMoveDocumentToFolder}
+              onDeleteDocument={onDeleteDocument}
+              onShareDocument={user ? onShareDocument : undefined}
               onStartRouteStep={(step, next) =>
                 void handleStartRouteStepInViewer(step, next)
               }
-              onToggleDiagnostic={onToggleDiagnostic}
-              onRecordDiagnosticSample={onRecordDiagnosticSample}
+              onToggleStepCompleted={onToggleStepCompleted}
+              onOpenPlannerTab={() => setCurrentModule('pomodoro')}
+              onCloseDrawer={() => onSetSidebarOpen(false)}
+            />
+          </div>
+        </>
+      )}
+
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative sf-env-canvas">
+        <Navbar
+          currentModule={currentModule}
+          onSwitchModule={setCurrentModule}
+          settings={studySettings}
+          onToggleAudio={() => void onToggleAudio()}
+          user={user}
+          syncStatus={syncStatus}
+          onOpenAccountModal={onOpenAccountModal}
+          onOpenFriendsModal={onOpenFriendsModal}
+          onOpenAppearanceModal={onOpenAppearanceModal}
+          onOpenTutorial={onOpenTutorial}
+          notificationsSlot={notificationsSlot}
+          hideBrandOnDesktop={currentModule === 'docs' && sidebarOpen}
+          layoutStyle={layoutStyle}
+          showOpenSidebarButton={currentModule === 'docs' && !sidebarOpen}
+          onOpenSidebar={() => onSetSidebarOpen(true)}
+        />
+
+        <main className="flex-1 overflow-hidden relative">
+          {currentModule === 'docs' && (
+            <div className="h-full flex overflow-hidden relative">
+              <DocumentViewer
+                activeDoc={activeDoc}
+                documentBuffer={activeBuffer}
+                isLoadingBuffer={isLoadingBuffer}
+                notes={notes}
+                studySettings={studySettings}
+                planResult={planResult}
+                diagnosticData={diagnosticData}
+                highlightedNoteId={highlightedNoteId}
+                onChangePage={(docId, p) => void onChangePage(docId, p)}
+                onOpenDocumentAtPage={(docId, p) => void onOpenDocument(docId, p)}
+                onStartRouteStep={(step, next) =>
+                  void handleStartRouteStepInViewer(step, next)
+                }
+                onToggleDiagnostic={onToggleDiagnostic}
+                onRecordDiagnosticSample={onRecordDiagnosticSample}
+                onOpenDiagnosticModal={onOpenDiagnosticModal}
+                onCreateNote={onCreateNote}
+                onUpdateNote={onUpdateNote}
+                onDeleteNote={onDeleteNote}
+                onNotify={onNotify}
+                sidebarOpen={sidebarOpen}
+                onToggleSidebar={() => onSetSidebarOpen((v) => !v)}
+                currentUserId={user?.id || null}
+                currentUsername={user?.username || null}
+                collaboratorsPresence={collaboratorsPresence}
+                onShareDocument={user ? onShareDocument : undefined}
+                layoutStyle={layoutStyle}
+              />
+            </div>
+          )}
+
+        {currentModule === 'pomodoro' && (
+          <div
+            className={`h-full overflow-hidden ${
+              layoutStyle === 'islands' ? 'pt-14 sm:pt-16' : ''
+            }`}
+          >
+            <PomodoroAndPlanner
+              folders={folders}
+              documents={documents}
+              tasks={tasks}
+              settings={studySettings}
+              planState={planState}
+              planResult={planResult}
+              diagnosticData={diagnosticData}
+              onStartDiagnosticInViewer={onStartDiagnosticInViewer}
               onOpenDiagnosticModal={onOpenDiagnosticModal}
-              onCreateNote={onCreateNote}
-              onUpdateNote={onUpdateNote}
-              onDeleteNote={onDeleteNote}
+              onUpdateSettings={onUpdateSettings}
+              onUpdatePlanState={onUpdatePlanState}
+              onStartRouteStepInViewer={(step, next) =>
+                void handleStartRouteStepInViewer(step, next)
+              }
+              onToggleStepCompleted={onToggleStepCompleted}
+              onAddTask={onAddTask}
+              onToggleTask={onToggleTask}
+              onDeleteTask={onDeleteTask}
               onNotify={onNotify}
-              sidebarOpen={sidebarOpen}
-              onToggleSidebar={() => onSetSidebarOpen((v) => !v)}
-              currentUserId={user?.id || null}
-              currentUsername={user?.username || null}
-              collaboratorsPresence={collaboratorsPresence}
-              onShareDocument={user ? onShareDocument : undefined}
+              forceSessionKey={forcePomodoroSessionKey}
             />
           </div>
         )}
 
-        {currentModule === 'pomodoro' && (
-          <PomodoroAndPlanner
-            folders={folders}
-            documents={documents}
-            tasks={tasks}
-            settings={studySettings}
-            planState={planState}
-            planResult={planResult}
-            diagnosticData={diagnosticData}
-            onStartDiagnosticInViewer={onStartDiagnosticInViewer}
-            onOpenDiagnosticModal={onOpenDiagnosticModal}
-            onUpdateSettings={onUpdateSettings}
-            onUpdatePlanState={onUpdatePlanState}
-            onStartRouteStepInViewer={(step, next) =>
-              void handleStartRouteStepInViewer(step, next)
-            }
-            onToggleStepCompleted={onToggleStepCompleted}
-            onAddTask={onAddTask}
-            onToggleTask={onToggleTask}
-            onDeleteTask={onDeleteTask}
-            onNotify={onNotify}
-            forceSessionKey={forcePomodoroSessionKey}
-          />
-        )}
-
         {currentModule === 'board' && (
-          <KanbanBoard
-            folders={folders}
-            documents={documents}
-            notes={notes}
-            onCreateNote={onCreateNote}
-            onUpdateNote={onUpdateNote}
-            onDeleteNote={onDeleteNote}
-            onOpenNoteLocation={onOpenNoteLocation}
-            onNotify={onNotify}
-          />
+          <div
+            className={`h-full overflow-hidden ${
+              layoutStyle === 'islands' ? 'pt-14 sm:pt-16' : ''
+            }`}
+          >
+            <KanbanBoard
+              folders={folders}
+              documents={documents}
+              notes={notes}
+              onCreateNote={onCreateNote}
+              onUpdateNote={onUpdateNote}
+              onDeleteNote={onDeleteNote}
+              onOpenNoteLocation={onOpenNoteLocation}
+              onNotify={onNotify}
+            />
+          </div>
         )}
-      </main>
+        </main>
+      </div>
     </div>
   );
 };

@@ -3,6 +3,7 @@ import {
   Check,
   FileText,
   Image as ImageIcon,
+  Layout,
   Moon,
   Palette,
   Pipette,
@@ -129,6 +130,65 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
 
         {/* Contenido scrollable */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-6">
+          {/* Sección 0: Estilo de Interfaz (Islas Dinámicas vs Clásico) */}
+          <section className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                <Layout className="w-3.5 h-3.5 text-indigo-400" />
+                Estilo de Interfaz y Controles
+              </h3>
+              <span className="text-[11px] text-slate-400">
+                Ajustable al instante
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {(
+                [
+                  {
+                    id: 'islands',
+                    name: 'Islas Dinámicas (Por defecto)',
+                    description:
+                      'Navegación flotante arriba con burbuja compactable, controles de página abajo y mayor área libre.',
+                  },
+                  {
+                    id: 'classic',
+                    name: 'Barra Clásica',
+                    description:
+                      'Encabezado superior tradicional de ancho completo y barra de controles de lectura arriba.',
+                  },
+                ] as const
+              ).map((opt) => {
+                const currentStyle = appearance.layoutStyle || 'islands';
+                const isSelected = currentStyle === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => updateField('layoutStyle', opt.id)}
+                    className={`text-left p-3.5 rounded-xl border transition-all flex flex-col gap-1.5 ${
+                      isSelected
+                        ? 'border-indigo-400 bg-indigo-500/20 ring-1 ring-indigo-500/50'
+                        : 'border-slate-800 bg-slate-950/45 hover:border-indigo-500/40 hover:bg-slate-900'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-white">
+                        {opt.name}
+                      </span>
+                      {isSelected && (
+                        <Check className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      {opt.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
           {/* Sección 1: Tema base */}
           <section className="space-y-2.5">
             <div className="flex items-center justify-between">

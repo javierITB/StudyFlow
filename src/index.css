@@ -278,6 +278,50 @@
   border-radius: 0.75rem;
 }
 
+[data-ui-radius='soft'] .rounded-t-lg {
+  border-top-left-radius: 0.65rem;
+  border-top-right-radius: 0.65rem;
+}
+
+/* Preservar esquinas específicas cuando data-ui-radius modifica border-radius */
+[data-ui-radius='soft'] .rounded-tl-none,
+[data-ui-radius='sharp'] .rounded-tl-none,
+[data-ui-radius='modern'] .rounded-tl-none {
+  border-top-left-radius: 0 !important;
+}
+
+[data-ui-radius='soft'] .rounded-tr-none,
+[data-ui-radius='sharp'] .rounded-tr-none,
+[data-ui-radius='modern'] .rounded-tr-none {
+  border-top-right-radius: 0 !important;
+}
+
+[data-ui-radius='soft'] .rounded-bl-none,
+[data-ui-radius='sharp'] .rounded-bl-none,
+[data-ui-radius='modern'] .rounded-bl-none {
+  border-bottom-left-radius: 0 !important;
+}
+
+[data-ui-radius='soft'] .rounded-br-none,
+[data-ui-radius='sharp'] .rounded-br-none,
+[data-ui-radius='modern'] .rounded-br-none {
+  border-bottom-right-radius: 0 !important;
+}
+
+[data-ui-radius='soft'] .rounded-t-none,
+[data-ui-radius='sharp'] .rounded-t-none,
+[data-ui-radius='modern'] .rounded-t-none {
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+}
+
+[data-ui-radius='soft'] .rounded-b-none,
+[data-ui-radius='sharp'] .rounded-b-none,
+[data-ui-radius='modern'] .rounded-b-none {
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
 /* Adaptación automática de contraste para Modo Claro (Papel Académico) */
 [data-theme-mode='light'] .text-white {
   color: rgb(var(--sf-text-max));

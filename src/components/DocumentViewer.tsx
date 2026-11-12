@@ -41,6 +41,7 @@ import {
   DocumentRecord,
   DocumentType,
   KanbanZone,
+  LayoutStyleId,
   NoteColor,
   RouteSegment,
   RouteStep,
@@ -90,6 +91,7 @@ interface DocumentViewerProps {
   currentUsername?: string | null;
   collaboratorsPresence?: CollaboratorPresence[];
   onShareDocument?: (doc: DocumentRecord) => void;
+  layoutStyle?: LayoutStyleId;
 }
 
 const NOTE_COLORS: Array<{ id: NoteColor; label: string; dotClass: string }> = [
@@ -128,6 +130,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   currentUsername = null,
   collaboratorsPresence = [],
   onShareDocument,
+  layoutStyle = 'islands',
 }) => {
   const {
     mode,
@@ -181,6 +184,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [livePendingSeconds, setLivePendingSeconds] = useState<number>(0);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [dockCollapsed, setDockCollapsed] = useState<boolean>(false);
+  const [routeIslandCompact, setRouteIslandCompact] = useState<boolean>(false);
   const [newNoteShared, setNewNoteShared] = useState<boolean>(true);
   const isViewerOnly = activeDoc?.sharedRole === 'viewer';
   const isCollaborativeDoc = Boolean(
@@ -1621,8 +1625,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           : 'flex-1 h-full flex flex-col bg-slate-950 overflow-hidden relative'
       }
     >
-      {/* Barra de herramientas del visor (se oculta en Modo Inmersivo) */}
-      {!isFullscreen && (
+      {/* Barra de herramientas del visor en la parte superior (solo en Modo Clásico) */}
+      {!isFullscreen && layoutStyle === 'classic' && (
         <div
           data-tour-id="tour-viewer-tools"
           className="min-h-[2.625rem] xl:min-h-[3rem] py-1 xl:py-1.5 border-b border-indigo-500/35 bg-slate-900/90 backdrop-blur-md px-2 sm:px-3 flex flex-wrap md:flex-nowrap items-center justify-between flex-shrink-0 z-20 gap-1.5 xl:gap-2 overflow-x-auto"
@@ -1934,8 +1938,9 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         </div>
       )}
 
-      {/* Mini barra de ruta y temporizador integrada en lectura (oculta en fullscreen para evitar ruido) */}
+      {/* Mini barra de ruta y temporizador integrada en lectura (solo en Modo Clásico) */}
       {!isFullscreen &&
+        layoutStyle === 'classic' &&
         (activeRouteStep ||
           nextPendingStudyInfo ||
           isRunning ||
@@ -2061,6 +2066,13 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           </div>
         )}
 
+      {/* Espaciador superior para barras activas bajo las islas flotantes */}
+      {!isFullscreen &&
+        layoutStyle === 'islands' &&
+        ((activeDoc && isCollaborativeDoc) || diagnosticData.isActive) && (
+          <div className="h-12 sm:h-14 flex-shrink-0" />
+        )}
+
       {/* Barra de Sesión Colaborativa y Presencia en vivo */}
       {!isFullscreen && activeDoc && isCollaborativeDoc && (
         <div className="px-3 py-1.5 border-b border-emerald-500/25 bg-emerald-950/20 flex flex-wrap items-center justify-between gap-2 text-[11px] z-20 flex-shrink-0">
@@ -2158,7 +2170,15 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               lockHorizontalScroll
                 ? 'overflow-y-auto overflow-x-hidden touch-pan-y overscroll-x-none items-center'
                 : 'overflow-auto items-start'
-            } ${isFullscreen ? 'p-3 sm:p-4 pb-24' : 'p-2 sm:p-4 pb-16 sm:pb-5'}`}
+            } ${
+              isFullscreen
+                ? 'p-3 sm:p-4 pb-24'
+                : layoutStyle === 'islands'
+                  ? (activeDoc && isCollaborativeDoc) || diagnosticData.isActive
+                    ? 'p-2 sm:p-4 pb-28 sm:pb-32'
+                    : 'p-2 sm:p-4 pt-14 sm:pt-16 pb-28 sm:pb-32'
+                  : 'p-2 sm:p-4 pb-16 sm:pb-5'
+            }`}
           >
           {!activeDoc ? (
             <div className="m-auto text-center py-10 px-4 max-w-md space-y-3">
@@ -2467,7 +2487,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
           {/* Indicador flotante (HUD) de paso de página al usar gestos o toques */}
           {pageTurnFeedback && activeDoc && (
-            <div className="pointer-events-none absolute top-3 sm:top-5 inset-x-0 z-40 flex justify-center animate-in fade-in zoom-in-95 duration-150">
+            <div
+              className={`pointer-events-none absolute inset-x-0 z-40 flex justify-center animate-in fade-in zoom-in-95 duration-150 ${
+                !isFullscreen && layoutStyle === 'islands' ? 'top-16 sm:top-18' : 'top-3 sm:top-5'
+              }`}
+            >
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/95 border border-indigo-500/40 backdrop-blur-md shadow-2xl text-slate-100 text-xs font-medium">
                 {pageTurnFeedback.direction === 'prev' ? (
                   <ChevronLeft className="w-4 h-4 text-indigo-400 animate-pulse" />
@@ -2482,14 +2506,134 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </div>
           )}
 
-          {/* Barra de controles flotante en la zona inferior (en Modo Inmersivo, o en móvil para zoom/páginas rápidas) */}
-          {activeDoc && mode === 'study' && !transitionPrompt && (
-            <div
-              className={`pointer-events-none absolute inset-x-0 bottom-2.5 sm:bottom-4 z-30 flex justify-center px-2 sm:px-4 ${
-                isFullscreen ? '' : 'sm:hidden'
-              }`}
-            >
-              {dockCollapsed ? (
+          {/* Pila flotante inferior: Micro-isla de Ruta + Isla de Controles de Lectura */}
+          {mode === 'study' &&
+            !transitionPrompt &&
+            (activeDoc || (!isFullscreen && layoutStyle === 'islands')) && (
+              <div
+                className={`pointer-events-none absolute inset-x-0 bottom-2.5 sm:bottom-3.5 z-30 flex flex-col items-center gap-2 px-2 sm:px-4 ${
+                  isFullscreen || layoutStyle === 'islands' ? '' : 'sm:hidden'
+                }`}
+              >
+                {/* Micro-isla de Hoja de Ruta (solo en Modo Islas Dinámicas fuera de fullscreen) */}
+                {!isFullscreen &&
+                  layoutStyle === 'islands' &&
+                  (activeRouteStep ||
+                    nextPendingStudyInfo ||
+                    isRunning ||
+                    studySettings.intervalMode === 'pages') && (
+                    <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-indigo-500/35 bg-slate-900/90 backdrop-blur-xl px-2.5 py-1 shadow-xl text-[11px] max-w-[95vw]">
+                      <span className="font-mono font-bold px-1.5 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/35 text-indigo-300 flex-shrink-0">
+                        {formattedClock}
+                      </span>
+
+                      {routeIslandCompact ? (
+                        <button
+                          type="button"
+                          onClick={() => setRouteIslandCompact(false)}
+                          className="text-slate-300 hover:text-white flex items-center gap-1 pr-1"
+                          title="Expandir hoja de ruta"
+                        >
+                          <Route className="w-3 h-3 text-indigo-400" />
+                          <span>Ruta</span>
+                          <ChevronUp className="w-3 h-3 text-slate-400" />
+                        </button>
+                      ) : (
+                        <>
+                          {activeRouteStep ? (
+                            <span className="text-slate-200 truncate max-w-[42vw] sm:max-w-xs font-medium">
+                              {activeSegment
+                                ? `${activeSegment.docName} · p.${activeSegment.startPage}-${activeSegment.endPage}`
+                                : activeRouteStep.type === 'study'
+                                  ? `${activeRouteStep.docName} · p.${activeRouteStep.startPage}-${activeRouteStep.endPage}`
+                                  : `${
+                                      activeRouteStep.type === 'long_break'
+                                        ? 'Descanso largo'
+                                        : 'Descanso corto'
+                                    } (${activeRouteStep.durationMinutes}m)`}
+                            </span>
+                          ) : nextPendingStudyInfo ? (
+                            <span className="text-slate-300 truncate max-w-[42vw] sm:max-w-xs flex items-center gap-1">
+                              <Route className="w-3 h-3 text-indigo-400 flex-shrink-0" />
+                              <span className="truncate">
+                                Siguiente: {nextPendingStudyInfo.step.docName} · p.
+                                {nextPendingStudyInfo.step.startPage}–
+                                {nextPendingStudyInfo.step.endPage}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-300 truncate max-w-[42vw] sm:max-w-xs">
+                              {studySettings.intervalMode === 'pages'
+                                ? `Bloques de ${studySettings.pagesPerBlock} págs`
+                                : mode === 'study'
+                                  ? `Estudio (${studySettings.studyMinutes}m)`
+                                  : 'Descanso activo'}
+                            </span>
+                          )}
+
+                          {!activeRouteStep && nextPendingStudyInfo && !isRunning ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onStartRouteStep(
+                                  nextPendingStudyInfo.step,
+                                  nextPendingStudyInfo.nextStep
+                                )
+                              }
+                              className="px-2 py-0.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold flex items-center gap-1 flex-shrink-0"
+                            >
+                              <Play className="w-2.5 h-2.5" />
+                              <span className="hidden sm:inline">Iniciar bloque</span>
+                              <span className="sm:hidden">Iniciar</span>
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={toggleTimer}
+                                className="px-2 py-0.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1"
+                              >
+                                {isRunning ? (
+                                  <Pause className="w-2.5 h-2.5" />
+                                ) : (
+                                  <Play className="w-2.5 h-2.5" />
+                                )}
+                                <span className="hidden sm:inline">
+                                  {isRunning ? 'Pausar' : 'Iniciar'}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={
+                                  hasPackedSegments &&
+                                  activeSegmentIndex < activeSegments.length - 1
+                                    ? completeCurrentSegment
+                                    : completeCurrentBlock
+                                }
+                                title="Completar bloque o archivo"
+                                className="px-2 py-0.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1"
+                              >
+                                <CheckCircle2 className="w-2.5 h-2.5" />
+                                <span className="hidden sm:inline">Completar</span>
+                              </button>
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setRouteIslandCompact(true)}
+                            title="Compactar barra de ruta"
+                            className="p-0.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800"
+                          >
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                {/* Isla de Controles de Página, Zoom y Notas */}
+                {activeDoc && (dockCollapsed ? (
                 <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-indigo-500/40 bg-slate-900/90 backdrop-blur-md px-2.5 py-1.5 shadow-xl sf-accent-glow text-xs">
                   <button
                     type="button"
@@ -2672,11 +2816,39 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                       ))}
                     </div>
 
+                    {isCollaborativeDoc && !isViewerOnly && (
+                      <button
+                        type="button"
+                        onClick={() => setNewNoteShared((v) => !v)}
+                        title={
+                          newNoteShared
+                            ? 'Nuevas notas compartidas (clic para privadas)'
+                            : 'Nuevas notas privadas (clic para compartir)'
+                        }
+                        className={`p-1.5 rounded-lg border transition-colors ${
+                          newNoteShared
+                            ? 'border-emerald-500/45 bg-emerald-500/15 text-emerald-200'
+                            : 'border-amber-500/45 bg-amber-500/15 text-amber-200'
+                        }`}
+                      >
+                        {newNoteShared ? (
+                          <Globe className="w-3.5 h-3.5" />
+                        ) : (
+                          <Lock className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    )}
+
                     <button
                       type="button"
+                      disabled={isViewerOnly}
                       onClick={() => void handleAddMarginNote()}
-                      title="Agregar nota en el margen sin tapar el texto"
-                      className="px-2 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/35 border border-indigo-500/45 text-indigo-200 font-medium flex items-center gap-1 text-[11px] transition-colors"
+                      title={
+                        isViewerOnly
+                          ? 'Solo lectura en este documento compartido'
+                          : 'Agregar nota en el margen sin tapar el texto'
+                      }
+                      className="px-2 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/35 border border-indigo-500/45 text-indigo-200 font-medium flex items-center gap-1 text-[11px] transition-colors disabled:opacity-40 disabled:pointer-events-none"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Al margen</span>
@@ -2684,9 +2856,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
                     <button
                       type="button"
+                      disabled={isViewerOnly}
                       onClick={handleToggleStickyMode}
-                      title="Fijar post-it donde hagas clic o toque"
-                      className={`px-2 py-1 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors ${
+                      title={
+                        isViewerOnly
+                          ? 'Solo lectura en este documento compartido'
+                          : 'Fijar post-it donde hagas clic o toque'
+                      }
+                      className={`px-2 py-1 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors disabled:opacity-40 disabled:pointer-events-none ${
                         stickyMode
                           ? 'bg-indigo-600 text-white shadow-sm'
                           : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200'
@@ -2695,6 +2872,18 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                       <StickyNote className="w-3.5 h-3.5" />
                       <span>{stickyMode ? 'Fijar Activo' : 'Pegar'}</span>
                     </button>
+
+                    {onShareDocument && (!activeDoc.sharedRole || activeDoc.sharedRole === 'owner') && (
+                      <button
+                        type="button"
+                        onClick={() => onShareDocument(activeDoc)}
+                        title="Compartir copia o iniciar sesión colaborativa"
+                        className="px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-200 font-medium flex items-center gap-1 text-[11px] transition-colors"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                        <span className="hidden lg:inline">Compartir</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -2798,7 +2987,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     </button>
                   </div>
                 </div>
-              )}
+              ))}
             </div>
           )}
         </div>
@@ -3015,8 +3204,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         )}
       </div>
 
-      {/* Barra inferior */}
-      {!isFullscreen && (
+      {/* Barra inferior (solo en Modo Clásico) */}
+      {!isFullscreen && layoutStyle === 'classic' && (
         <div className="hidden sm:flex h-7 border-t border-indigo-500/25 bg-slate-900/85 backdrop-blur px-3 items-center justify-between text-[11px] text-slate-400 flex-shrink-0">
           <span className="truncate max-w-xs md:max-w-md text-slate-300">
             {activeDoc ? activeDoc.name : 'Sin archivo abierto'}
