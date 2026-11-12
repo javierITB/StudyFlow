@@ -1408,27 +1408,30 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       {!isFullscreen && (
         <div
           data-tour-id="tour-viewer-tools"
-          className="min-h-[3rem] py-1.5 border-b border-indigo-500/35 bg-slate-900/90 backdrop-blur-md px-2.5 sm:px-3 flex flex-wrap items-center justify-between flex-shrink-0 z-20 gap-2"
+          className="min-h-[2.625rem] xl:min-h-[3rem] py-1 xl:py-1.5 border-b border-indigo-500/35 bg-slate-900/90 backdrop-blur-md px-2 sm:px-3 flex flex-wrap md:flex-nowrap items-center justify-between flex-shrink-0 z-20 gap-1.5 xl:gap-2 overflow-x-auto"
         >
           {/* Panel lateral + Navegacion de paginas */}
-          <div className="flex items-center space-x-1.5">
+          <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0 whitespace-nowrap">
             {onToggleSidebar && (
               <button
                 type="button"
                 onClick={onToggleSidebar}
-                title={sidebarOpen ? 'Colapsar panel lateral' : 'Expandir panel de archivos y ruta'}
-                className={`px-2 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 border transition-colors ${
+                title={sidebarOpen ? 'Ocultar panel de archivos y ruta' : 'Abrir panel de archivos y ruta'}
+                className={`px-2 py-1 xl:py-1.5 rounded-lg text-[11px] xl:text-xs font-medium flex items-center gap-1.5 border transition-colors ${
                   sidebarOpen
                     ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-200'
                     : 'bg-indigo-600 hover:bg-indigo-500 border-indigo-400 text-white shadow-sm'
                 }`}
               >
                 {sidebarOpen ? (
-                  <PanelLeft className="w-4 h-4 text-indigo-300" />
+                  <PanelLeft className="w-3.5 h-3.5 xl:w-4 xl:h-4 text-indigo-300" />
                 ) : (
-                  <PanelLeftOpen className="w-4 h-4 text-white" />
+                  <PanelLeftOpen className="w-3.5 h-3.5 xl:w-4 xl:h-4 text-white" />
                 )}
-                <span className="hidden sm:inline">
+                <span className="hidden lg:inline xl:hidden">
+                  {sidebarOpen ? 'Ocultar' : 'Panel'}
+                </span>
+                <span className="hidden xl:inline">
                   {sidebarOpen ? 'Material' : 'Abrir panel'}
                 </span>
               </button>
@@ -1439,11 +1442,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               disabled={!activeDoc || currentPage <= 1}
               onClick={() => stepPage(-1)}
               title="Página anterior"
-              className="p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              className="p-1 xl:p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 disabled:opacity-30 disabled:pointer-events-none transition-colors"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-3.5 h-3.5 xl:w-4 xl:h-4" />
             </button>
-            <div className="flex items-center text-xs text-slate-300 font-mono">
+            <div className="flex items-center text-[11px] xl:text-xs text-slate-300 font-mono">
               <input
                 type="number"
                 min={1}
@@ -1451,10 +1454,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 disabled={!activeDoc}
                 value={activeDoc ? currentPage : 0}
                 onChange={(e) => handleJumpToPage(e.target.value)}
-                className="w-12 text-center bg-slate-950/90 border border-indigo-500/40 rounded-md py-0.5 text-xs text-white focus:outline-none focus:border-indigo-400"
+                className="w-10 xl:w-12 text-center bg-slate-950/90 border border-indigo-500/40 rounded-md py-0.5 text-[11px] xl:text-xs text-white focus:outline-none focus:border-indigo-400"
               />
               {hasSecondaryPage && (
-                <span className="ml-1 text-[11px] text-indigo-300 font-semibold">
+                <span className="ml-1 text-[10px] xl:text-[11px] text-indigo-300 font-semibold">
                   (+{currentPage + 1})
                 </span>
               )}
@@ -1466,37 +1469,38 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               disabled={!activeDoc || currentPage >= totalPages}
               onClick={() => stepPage(1)}
               title="Página siguiente"
-              className="p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              className="p-1 xl:p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 disabled:opacity-30 disabled:pointer-events-none transition-colors"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-3.5 h-3.5 xl:w-4 xl:h-4" />
             </button>
           </div>
 
           {/* Zoom y Modo Libro 1/2 hojas */}
-          <div className="hidden sm:flex items-center space-x-1">
+          <div className="hidden sm:flex items-center gap-1 flex-shrink-0 whitespace-nowrap">
             <button
               type="button"
               onClick={() => adjustZoom(-0.15)}
               title="Alejar"
-              className="p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 transition-colors"
+              className="p-1 xl:p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 transition-colors"
             >
-              <Minus className="w-4 h-4" />
+              <Minus className="w-3.5 h-3.5 xl:w-4 xl:h-4" />
             </button>
-            <span className="text-xs font-mono text-indigo-200 bg-indigo-500/10 border border-indigo-500/25 rounded-md px-2 py-0.5">
+            <span className="text-[11px] xl:text-xs font-mono text-indigo-200 bg-indigo-500/10 border border-indigo-500/25 rounded-md px-1.5 xl:px-2 py-0.5">
               {Math.round(zoom * 100)}%
             </span>
             <button
               type="button"
               onClick={() => adjustZoom(0.15)}
               title="Acercar"
-              className="p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 transition-colors"
+              className="p-1 xl:p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 transition-colors"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-3.5 h-3.5 xl:w-4 xl:h-4" />
             </button>
             <button
               type="button"
               onClick={() => void handleFitToWidth()}
-              className="py-1 px-2.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 text-xs transition-colors"
+              title="Ajustar al ancho de pantalla"
+              className="py-1 px-2 xl:px-2.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 text-[11px] xl:text-xs transition-colors"
             >
               Ajustar
             </button>
@@ -1509,29 +1513,45 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                   ? 'Cambiar a vista de 1 hoja'
                   : 'Vista tipo libro de 2 hojas (avanza de 1 en 1)'
               }
-              className={`py-1 px-2.5 rounded-lg text-xs font-medium flex items-center gap-1.5 border transition-colors disabled:opacity-40 disabled:pointer-events-none ${
+              className={`py-1 px-2 xl:px-2.5 rounded-lg text-[11px] xl:text-xs font-medium flex items-center gap-1 border transition-colors disabled:opacity-40 disabled:pointer-events-none ${
                 viewMode === 'double'
                   ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm'
                   : 'bg-slate-800/90 hover:bg-indigo-500/20 border-indigo-500/25 hover:border-indigo-400/55 text-slate-200'
               }`}
             >
               <Columns2 className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">
+              <span className="hidden xl:inline">
                 {viewMode === 'double' ? '2 Hojas' : '1 Hoja'}
               </span>
             </button>
           </div>
 
           {/* Herramientas Post-it y Modo Inmersivo */}
-          <div className="flex items-center flex-wrap gap-1.5">
-            <div className="hidden md:flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800">
+          <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0 whitespace-nowrap">
+            <button
+              type="button"
+              onClick={() => {
+                const idx = NOTE_COLORS.findIndex((c) => c.id === selectedColor);
+                setSelectedColor(NOTE_COLORS[(idx + 1) % NOTE_COLORS.length].id);
+              }}
+              title="Cambiar color de nueva nota"
+              className="lg:hidden p-1.5 rounded-lg bg-slate-950/80 border border-slate-800 flex items-center justify-center"
+            >
+              <span
+                className={`w-3 h-3 rounded-full border border-white/80 ${
+                  NOTE_COLORS.find((c) => c.id === selectedColor)?.dotClass || 'bg-amber-300'
+                }`}
+              />
+            </button>
+
+            <div className="hidden lg:flex items-center gap-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800">
               {NOTE_COLORS.map((c) => (
                 <button
                   key={c.id}
                   type="button"
                   title={c.label}
                   onClick={() => setSelectedColor(c.id)}
-                  className={`w-4 h-4 rounded-full ${c.dotClass} transition-transform ${
+                  className={`w-3.5 h-3.5 xl:w-4 xl:h-4 rounded-full ${c.dotClass} transition-transform ${
                     selectedColor === c.id
                       ? 'border-2 border-white scale-110'
                       : 'border border-transparent opacity-70 hover:opacity-100'
@@ -1544,23 +1564,28 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               type="button"
               onClick={() => void handleAddMarginNote()}
               title="Crear nota directamente en el margen lateral sin tapar el texto"
-              className="px-2.5 py-1 rounded-lg text-xs font-medium border border-indigo-500/45 bg-indigo-500/20 hover:bg-indigo-500/35 text-indigo-200 flex items-center gap-1 transition-colors"
+              className="px-2 xl:px-2.5 py-1 rounded-lg text-[11px] xl:text-xs font-medium border border-indigo-500/45 bg-indigo-500/20 hover:bg-indigo-500/35 text-indigo-200 flex items-center gap-1 transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Al margen</span>
+              <span className="hidden lg:inline xl:hidden">Margen</span>
+              <span className="hidden xl:inline">Al margen</span>
             </button>
 
             <button
               type="button"
               onClick={handleToggleStickyMode}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
+              title="Fijar nota donde hagas clic o toque"
+              className={`px-2 xl:px-2.5 py-1 rounded-lg text-[11px] xl:text-xs font-medium flex items-center gap-1 transition-colors ${
                 stickyMode
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'border border-slate-700 bg-slate-800 text-slate-300 hover:text-white'
               }`}
             >
               <StickyNote className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">
+              <span className="hidden lg:inline xl:hidden">
+                {stickyMode ? 'Fijando' : 'Nota'}
+              </span>
+              <span className="hidden xl:inline">
                 {stickyMode ? 'Fijar Activo' : 'Pegar Nota'}
               </span>
             </button>
@@ -1569,7 +1594,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               type="button"
               onClick={() => onToggleDiagnostic(!diagnosticData.isActive)}
               title="Medir tiempo real por página para calcular el Pomodoro recomendado"
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
+              className={`px-2 xl:px-2.5 py-1 rounded-lg text-[11px] xl:text-xs font-medium flex items-center gap-1 transition-colors ${
                 diagnosticData.isActive
                   ? 'bg-emerald-600 text-white shadow-sm'
                   : 'border border-slate-700 bg-slate-800 text-slate-300 hover:text-white'
@@ -1583,14 +1608,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               type="button"
               onClick={() => setShowNotesRail((v) => !v)}
               title="Ver lista lateral de todas las notas del documento"
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
+              className={`px-2 xl:px-2.5 py-1 rounded-lg text-[11px] xl:text-xs font-medium flex items-center gap-1 transition-colors ${
                 showNotesRail
                   ? 'bg-indigo-500/25 text-indigo-200 border border-indigo-500/55'
                   : 'border border-slate-700 bg-slate-800 text-slate-300 hover:text-white'
               }`}
             >
               <PanelRight className="w-3.5 h-3.5" />
-              <span className="hidden lg:inline">Notas</span>
+              <span className="hidden xl:inline">Notas</span>
               <span className="font-mono text-[10px] px-1 rounded bg-slate-950/70">
                 {docNotes.length}
               </span>
@@ -1600,10 +1625,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               type="button"
               onClick={() => void toggleFullscreen()}
               title="Modo inmersivo de lectura (pantalla completa)"
-              className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm flex items-center gap-1.5 transition-colors"
+              className="px-2 xl:px-2.5 py-1 rounded-lg text-[11px] xl:text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm flex items-center gap-1 transition-colors"
             >
               <Maximize2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Pantalla completa</span>
+              <span className="hidden md:inline xl:hidden">Inmersivo</span>
+              <span className="hidden xl:inline">Pantalla completa</span>
             </button>
           </div>
         </div>
@@ -1649,14 +1675,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           nextPendingStudyInfo ||
           isRunning ||
           studySettings.intervalMode === 'pages') && (
-          <div className="px-3 py-1.5 border-b border-indigo-500/30 bg-indigo-500/10 flex flex-wrap items-center justify-between gap-2 text-xs z-20">
-            <div className="flex flex-wrap items-center gap-2 min-w-0">
-              <span className="font-mono font-bold px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-indigo-300">
+          <div className="px-2.5 sm:px-3 py-1 border-b border-indigo-500/30 bg-indigo-500/10 flex items-center justify-between gap-2 text-[11px] xl:text-xs z-20 flex-shrink-0">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <span className="font-mono font-bold px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-indigo-300 flex-shrink-0">
                 {formattedClock}
               </span>
 
               {activeRouteStep ? (
-                <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0">
                   <span className="text-slate-200 truncate font-medium">
                     {activeSegment
                       ? `${activeSegment.docName} · Págs. ${activeSegment.startPage}–${activeSegment.endPage}`
@@ -1716,7 +1742,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               )}
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap">
               {!activeRouteStep && nextPendingStudyInfo && !isRunning ? (
                 <button
                   type="button"
@@ -1726,17 +1752,18 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                       nextPendingStudyInfo.nextStep
                     )
                   }
-                  className="px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-semibold flex items-center gap-1 text-[11px]"
+                  className="px-2 sm:px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-semibold flex items-center gap-1 text-[11px]"
                 >
                   <Play className="w-3 h-3" />
-                  <span>Iniciar bloque de ruta</span>
+                  <span className="sm:hidden">Iniciar</span>
+                  <span className="hidden sm:inline">Iniciar bloque de ruta</span>
                 </button>
               ) : (
                 <>
                   <button
                     type="button"
                     onClick={toggleTimer}
-                    className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1 text-[11px]"
+                    className="px-2 sm:px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1 text-[11px]"
                   >
                     {isRunning ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                     <span>{isRunning ? 'Pausar' : 'Iniciar'}</span>
@@ -1746,19 +1773,21 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     <button
                       type="button"
                       onClick={completeCurrentSegment}
-                      className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1 text-[11px]"
+                      className="px-2 sm:px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1 text-[11px]"
                     >
                       <CheckCircle2 className="w-3 h-3" />
-                      <span>Terminar archivo</span>
+                      <span className="sm:hidden">Terminar</span>
+                      <span className="hidden sm:inline">Terminar archivo</span>
                     </button>
                   ) : (
                     <button
                       type="button"
                       onClick={completeCurrentBlock}
-                      className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1 text-[11px]"
+                      className="px-2 sm:px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1 text-[11px]"
                     >
                       <CheckCircle2 className="w-3 h-3" />
-                      <span>Completar bloque</span>
+                      <span className="sm:hidden">Completar</span>
+                      <span className="hidden sm:inline">Completar bloque</span>
                     </button>
                   )}
                 </>
@@ -1813,37 +1842,37 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       {/* Area de Lectura + Controles flotantes inferiores + Panel lateral de Notas */}
       <div className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 relative flex flex-col overflow-hidden">
-          {!sidebarOpen && !isFullscreen && onToggleSidebar && (
-            <button
-              type="button"
-              onClick={onToggleSidebar}
-              title="Expandir panel de archivos y ruta"
-              className="hidden lg:flex items-center gap-1.5 absolute top-3 left-3 z-20 px-2.5 py-1.5 rounded-full bg-slate-900/90 hover:bg-indigo-600 border border-indigo-500/45 text-slate-100 hover:text-white text-[11px] font-medium shadow-lg backdrop-blur-md transition-colors"
-            >
-              <PanelLeftOpen className="w-3.5 h-3.5 text-indigo-300" />
-              <span>Archivos y Ruta</span>
-            </button>
-          )}
-
           <div
             ref={scrollContainerRef}
             className={`flex-1 flex flex-col sf-env-canvas ${
               lockHorizontalScroll
                 ? 'overflow-y-auto overflow-x-hidden touch-pan-y overscroll-x-none items-center'
                 : 'overflow-auto items-start'
-            } ${isFullscreen ? 'p-3 sm:p-4 pb-24' : 'p-2 sm:p-4 pb-5'}`}
+            } ${isFullscreen ? 'p-3 sm:p-4 pb-24' : 'p-2 sm:p-4 pb-16 sm:pb-5'}`}
           >
           {!activeDoc ? (
-            <div className="m-auto text-center py-20 px-4">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-indigo-500/15 border border-indigo-500/35 sf-accent-glow flex items-center justify-center text-indigo-400">
-                <BookOpen className="w-8 h-8" />
+            <div className="m-auto text-center py-10 px-4 max-w-md space-y-3">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-500/15 border border-indigo-500/35 sf-accent-glow flex items-center justify-center text-indigo-400">
+                <BookOpen className="w-7 h-7" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-300">
-                Selecciona o carga un documento
-              </h3>
-              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                Compatible con PDF, Word (.docx) y presentaciones PowerPoint (.pptx).
-              </p>
+              <div>
+                <h3 className="text-sm font-semibold text-slate-200">
+                  Selecciona o carga un documento
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Compatible con PDF, Word (.docx) y presentaciones PowerPoint (.pptx).
+                </p>
+              </div>
+              {!sidebarOpen && onToggleSidebar && (
+                <button
+                  type="button"
+                  onClick={onToggleSidebar}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-colors"
+                >
+                  <PanelLeftOpen className="w-4 h-4" />
+                  <span>Abrir biblioteca y subir material</span>
+                </button>
+              )}
             </div>
           ) : isLoadingBuffer || isParsingDoc ? (
             <div className="m-auto flex flex-col items-center gap-2 text-slate-400">
@@ -2087,9 +2116,13 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           )}
           </div>
 
-          {/* Barra de controles flotante en la zona inferior (paginas, zoom, notas y modo inmersivo) */}
+          {/* Barra de controles flotante en la zona inferior (en Modo Inmersivo, o en móvil para zoom/páginas rápidas) */}
           {activeDoc && mode === 'study' && !transitionPrompt && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-3 sm:bottom-4 z-30 flex justify-center px-2 sm:px-4">
+            <div
+              className={`pointer-events-none absolute inset-x-0 bottom-2.5 sm:bottom-4 z-30 flex justify-center px-2 sm:px-4 ${
+                isFullscreen ? '' : 'sm:hidden'
+              }`}
+            >
               {dockCollapsed ? (
                 <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-indigo-500/40 bg-slate-900/90 backdrop-blur-md px-2.5 py-1.5 shadow-xl sf-accent-glow text-xs">
                   <button
@@ -2137,7 +2170,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                   </button>
                 </div>
               ) : (
-                <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-indigo-500/50 bg-slate-900/90 backdrop-blur-xl px-2.5 py-1.5 shadow-2xl sf-accent-glow max-w-[96vw] text-xs">
+                <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1 sm:gap-1.5 rounded-2xl border border-indigo-500/50 bg-slate-900/90 backdrop-blur-xl px-2 sm:px-2.5 py-1 sm:py-1.5 shadow-2xl sf-accent-glow max-w-[96vw] text-xs">
                   {!isFullscreen && onToggleSidebar && (
                     <>
                       <button
@@ -2156,7 +2189,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                           <PanelLeftOpen className="w-3.5 h-3.5" />
                         )}
                       </button>
-                      <span className="w-px h-5 bg-indigo-500/25" />
+                      <span className="hidden sm:block w-px h-5 bg-indigo-500/25" />
                     </>
                   )}
 
@@ -2200,7 +2233,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     </button>
                   </div>
 
-                  <span className="w-px h-5 bg-indigo-500/25" />
+                  <span className="hidden sm:block w-px h-5 bg-indigo-500/25" />
 
                   {/* Zoom y Modo Libro */}
                   <div className="flex items-center gap-1">
@@ -2253,7 +2286,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     </button>
                   </div>
 
-                  <span className="w-px h-5 bg-indigo-500/25" />
+                  <span className="hidden sm:block w-px h-5 bg-indigo-500/25" />
 
                   {/* Notas, colores y agregados */}
                   <div className="flex items-center gap-1.5">
@@ -2312,7 +2345,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     </button>
                   </div>
 
-                  <span className="w-px h-5 bg-slate-700/80" />
+                  <span className="hidden sm:block w-px h-5 bg-slate-700/80" />
 
                   {/* Diagnostico, temporizador rapido, fullscreen y minimizar */}
                   <div className="flex items-center gap-1">
@@ -2579,7 +2612,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
       {/* Barra inferior */}
       {!isFullscreen && (
-        <div className="h-8 border-t border-indigo-500/25 bg-slate-900/85 backdrop-blur px-4 flex items-center justify-between text-[11px] text-slate-400 flex-shrink-0">
+        <div className="hidden sm:flex h-7 border-t border-indigo-500/25 bg-slate-900/85 backdrop-blur px-3 items-center justify-between text-[11px] text-slate-400 flex-shrink-0">
           <span className="truncate max-w-xs md:max-w-md text-slate-300">
             {activeDoc ? activeDoc.name : 'Sin archivo abierto'}
           </span>

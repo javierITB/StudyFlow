@@ -770,6 +770,10 @@ export function applyAppearanceToDocument(appearance: AppearanceSettings): void 
 
   s.setProperty('--sf-paper-bg', paper.hex);
   s.setProperty('--sf-font-sans', font.stack);
+  s.setProperty(
+    '--sf-ui-scale-factor',
+    scale.id === 'compact' ? '0.9375' : scale.id === 'comfortable' ? '1.0625' : '1'
+  );
   s.fontSize = scale.fontSizePx;
 }
 

@@ -76,12 +76,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   ];
 
   return (
-    <header className="min-h-[3.5rem] py-1.5 sf-header-chrome backdrop-blur flex items-center justify-between px-2.5 sm:px-4 gap-2 z-40 select-none flex-shrink-0">
-      <div className="flex items-center space-x-2.5 min-w-0">
-        <div className="w-9 h-9 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 flex-shrink-0">
-          <BookOpen className="w-5 h-5 text-white" />
+    <header className="h-12 xl:h-14 sf-header-chrome backdrop-blur flex items-center justify-between px-2 sm:px-3 xl:px-4 gap-1.5 sm:gap-2 z-40 select-none flex-shrink-0 overflow-hidden">
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="w-8 h-8 xl:w-9 xl:h-9 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 flex-shrink-0">
+          <BookOpen className="w-4 h-4 xl:w-5 xl:h-5 text-white" />
         </div>
-        <h1 className="text-sm sm:text-base font-bold tracking-tight text-white flex items-center gap-2 truncate">
+        <h1 className="hidden sm:flex text-sm xl:text-base font-bold tracking-tight text-white items-center gap-1.5 whitespace-nowrap">
           <span>StudyFlow</span>
           <span className="hidden xl:inline-flex text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
             2.0
@@ -91,7 +91,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       <nav
         data-tour-id="tour-nav-tabs"
-        className="flex items-center space-x-1 sm:space-x-1.5 bg-slate-950/75 p-1 rounded-xl border border-indigo-500/20"
+        className="flex items-center gap-0.5 sm:gap-1 bg-slate-950/75 p-0.5 sm:p-1 rounded-xl border border-indigo-500/20 flex-shrink-0"
       >
         {tabs.map((tab) => {
           const active = currentModule === tab.id;
@@ -100,33 +100,37 @@ export const Navbar: React.FC<NavbarProps> = ({
               key={tab.id}
               type="button"
               onClick={() => onSwitchModule(tab.id)}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 sm:gap-2 transition-all ${
+              title={tab.label}
+              className={`px-2 sm:px-2.5 xl:px-3 py-1 xl:py-1.5 rounded-lg text-[11px] xl:text-xs font-medium flex items-center gap-1 sm:gap-1.5 whitespace-nowrap transition-all ${
                 active
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
               {tab.icon}
-              <span className="hidden sm:inline lg:hidden">{tab.shortLabel}</span>
-              <span className="hidden lg:inline">{tab.label}</span>
+              <span className={active ? 'sm:hidden' : 'hidden'}>{tab.shortLabel}</span>
+              <span className="hidden sm:inline xl:hidden">{tab.shortLabel}</span>
+              <span className="hidden xl:inline">{tab.label}</span>
             </button>
           );
         })}
       </nav>
 
-      <div className="flex items-center space-x-1.5 sm:space-x-2 text-xs flex-shrink-0">
+      <div className="flex items-center gap-1 sm:gap-1.5 text-xs flex-shrink-0 whitespace-nowrap">
         <button
           type="button"
           onClick={toggleTimer}
           title={isRunning ? 'Pausar temporizador' : 'Iniciar temporizador'}
-          className="hidden sm:flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/35 text-slate-200 transition-colors"
+          className="flex items-center gap-1 sm:gap-1.5 px-2 py-1 xl:px-2.5 xl:py-1.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/35 text-slate-200 transition-colors"
         >
           <span
             className={`w-2 h-2 rounded-full ${
               isRunning ? 'bg-indigo-400 animate-pulse' : 'bg-indigo-500'
             }`}
           />
-          <span className="font-mono font-semibold">{formattedTime}</span>
+          <span className="font-mono font-semibold text-[11px] xl:text-xs">
+            {formattedTime}
+          </span>
           {isRunning ? (
             <Pause className="w-3 h-3 text-indigo-300" />
           ) : (
@@ -139,7 +143,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={onOpenTutorial}
           title="Tutorial rápido de StudyFlow"
           aria-label="Tutorial rápido de StudyFlow"
-          className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-indigo-500/20 border border-slate-700 hover:border-indigo-400/50 text-slate-200 transition-colors"
+          className="flex items-center gap-1 p-1.5 xl:px-2 xl:py-1.5 rounded-lg bg-slate-800 hover:bg-indigo-500/20 border border-slate-700 hover:border-indigo-400/50 text-slate-200 transition-colors"
         >
           <HelpCircle className="w-4 h-4 text-indigo-400" />
           <span className="hidden xl:inline text-xs font-medium">Guía</span>
@@ -150,18 +154,24 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={onOpenAppearanceModal}
           title="Personalizar tema, colores y tipografía"
           aria-label="Personalizar tema, colores y tipografía"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/40 text-indigo-200 transition-colors"
+          className="flex items-center gap-1.5 p-1.5 sm:px-2 xl:px-2.5 xl:py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/40 text-indigo-200 transition-colors"
         >
           <Palette className="w-4 h-4 text-indigo-400" />
-          <span className="hidden lg:inline text-xs font-medium">Tema</span>
+          <span className="hidden xl:inline text-xs font-medium">Tema</span>
           <span className="w-2 h-2 rounded-full bg-indigo-500 flex-shrink-0" />
         </button>
 
         <button
           type="button"
+          id="nav-account-button"
+          data-tour-id="tour-account-button"
           onClick={onOpenAccountModal}
-          title="Cuenta, sincronización y respaldo"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition-colors"
+          title={
+            user
+              ? `${user.fullName || user.email} · Cuenta y sincronización`
+              : 'Cuenta, sincronización y respaldo'
+          }
+          className="flex items-center gap-1.5 p-1.5 sm:px-2 xl:px-2.5 xl:py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition-colors"
         >
           {user ? (
             <>
@@ -174,14 +184,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                       : 'text-emerald-400'
                 }`}
               />
-              <span className="hidden lg:inline max-w-[120px] truncate text-[11px]">
+              <span className="hidden xl:inline max-w-[115px] truncate text-[11px]">
                 {user.fullName || user.email}
               </span>
             </>
           ) : (
             <>
               <HardDrive className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="hidden lg:inline text-[11px]">Local / Cuenta</span>
+              <span className="hidden xl:inline text-[11px]">Local / Cuenta</span>
             </>
           )}
         </button>
@@ -190,7 +200,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           type="button"
           onClick={onToggleAudio}
           title={settings.audioEnabled ? 'Silenciar alertas' : 'Activar alertas sonoras'}
-          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-colors"
+          aria-label={settings.audioEnabled ? 'Silenciar alertas' : 'Activar alertas sonoras'}
+          className="hidden sm:flex p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-colors"
         >
           {settings.audioEnabled ? (
             <Volume2 className="w-4 h-4" />

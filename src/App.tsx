@@ -68,6 +68,7 @@ import { AccountModal } from './components/AccountModal';
 import { DiagnosticModal } from './components/DiagnosticModal';
 import { AppearanceModal } from './components/AppearanceModal';
 import { TutorialOverlay } from './components/TutorialOverlay';
+import { AuthWelcomeModal } from './components/AuthWelcomeModal';
 
 const DEFAULT_DIAGNOSTIC_DATA: DiagnosticData = {
   isActive: false,
@@ -240,14 +241,14 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
           <div className="h-full flex overflow-hidden relative">
             {sidebarOpen && (
               <div
-                className="fixed inset-0 top-14 bg-slate-950/60 backdrop-blur-[1px] z-20 lg:hidden"
+                className="fixed inset-0 top-12 xl:top-14 bg-slate-950/60 backdrop-blur-[1px] z-20 lg:hidden"
                 onClick={() => onSetSidebarOpen(false)}
               />
             )}
             <div
               className={
                 sidebarOpen
-                  ? 'absolute inset-y-0 left-0 z-30 w-80 sm:w-[22rem] max-w-[90vw] shadow-2xl lg:static lg:z-auto lg:w-80 xl:w-96 lg:shadow-none flex-shrink-0 h-full transition-all duration-200'
+                  ? 'absolute inset-y-0 left-0 z-30 w-80 sm:w-[21rem] max-w-[88vw] shadow-2xl lg:static lg:z-auto lg:w-72 xl:w-80 2xl:w-96 lg:shadow-none flex-shrink-0 h-full transition-all duration-200'
                   : 'hidden lg:block lg:w-0 lg:overflow-hidden flex-shrink-0 h-full transition-all duration-200'
               }
             >
@@ -378,11 +379,40 @@ export const App: React.FC = () => {
   const [accountModalOpen, setAccountModalOpen] = useState<boolean>(false);
   const [diagnosticModalOpen, setDiagnosticModalOpen] = useState<boolean>(false);
   const [appearanceModalOpen, setAppearanceModalOpen] = useState<boolean>(false);
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
+  );
+  const [authWelcomeOpen, setAuthWelcomeOpen] = useState<boolean>(false);
   const [tutorialOpen, setTutorialOpen] = useState<boolean>(false);
   const [forcePomodoroSessionKey, setForcePomodoroSessionKey] = useState<number>(0);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const handleDismissAuthWelcome = useCallback(async () => {
+    setAuthWelcomeOpen(false);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('sf_auth_welcome_dismissed', '1');
+    }
+    void setSetting('authWelcomeDismissed', true);
+
+    // If tutorial hasn't been shown yet, seamlessly start the express tutorial
+    const tutorialDismissedLocal =
+      typeof window !== 'undefined' &&
+      window.localStorage.getItem('sf_tutorial_dismissed') === '1';
+    const tutorialDismissedDb = await getSetting<boolean>('tutorialDismissed');
+    if (!tutorialDismissedLocal && !tutorialDismissedDb) {
+      setTutorialOpen(true);
+    }
+  }, []);
+
+  const handleOpenSignInFromWelcome = useCallback(() => {
+    setAuthWelcomeOpen(false);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('sf_auth_welcome_dismissed', '1');
+    }
+    void setSetting('authWelcomeDismissed', true);
+    setAccountModalOpen(true);
+  }, []);
 
   const handleCloseTutorial = useCallback((markCompleted: boolean) => {
     setTutorialOpen(false);
@@ -456,11 +486,19 @@ export const App: React.FC = () => {
       }
     }
 
-    const dismissedLocal =
+    const authDismissedLocal =
+      typeof window !== 'undefined' &&
+      window.localStorage.getItem('sf_auth_welcome_dismissed') === '1';
+    const authDismissedDb = await getSetting<boolean>('authWelcomeDismissed');
+
+    const tutorialDismissedLocal =
       typeof window !== 'undefined' &&
       window.localStorage.getItem('sf_tutorial_dismissed') === '1';
-    const dismissedDb = await getSetting<boolean>('tutorialDismissed');
-    if (!dismissedLocal && !dismissedDb) {
+    const tutorialDismissedDb = await getSetting<boolean>('tutorialDismissed');
+
+    if (!authDismissedLocal && !authDismissedDb) {
+      setAuthWelcomeOpen(true);
+    } else if (!tutorialDismissedLocal && !tutorialDismissedDb) {
       setTutorialOpen(true);
     }
   }, []);
@@ -1453,6 +1491,12 @@ export const App: React.FC = () => {
         onChange={handleChangeAppearance}
         onReset={handleResetAppearance}
         onClose={() => setAppearanceModalOpen(false)}
+      />
+
+      <AuthWelcomeModal
+        open={authWelcomeOpen}
+        onOpenSignIn={handleOpenSignInFromWelcome}
+        onDismiss={handleDismissAuthWelcome}
       />
 
       <TutorialOverlay

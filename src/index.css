@@ -38,6 +38,20 @@
   body,
   #root {
     height: 100%;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* Escala proporcional automática en iPad / tablet y móvil para evitar UI sobredimensionada */
+  @media (max-width: 1180px), (max-width: 1280px) and (max-height: 780px) {
+    html {
+      font-size: calc(14px * var(--sf-ui-scale-factor, 1)) !important;
+    }
+  }
+
+  @media (max-width: 639px) {
+    html {
+      font-size: calc(13.5px * var(--sf-ui-scale-factor, 1)) !important;
+    }
   }
 
   body {

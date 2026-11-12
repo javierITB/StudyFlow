@@ -95,7 +95,7 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
       aria-labelledby="appearance-modal-title"
     >
       <div
-        className="w-full max-w-4xl max-h-[90dvh] flex flex-col rounded-2xl bg-slate-900 border border-indigo-500/35 sf-accent-glow shadow-2xl overflow-hidden"
+        className="w-full max-w-4xl max-h-[88dvh] flex flex-col rounded-2xl bg-slate-900 border border-indigo-500/35 sf-accent-glow shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Cabecera */}

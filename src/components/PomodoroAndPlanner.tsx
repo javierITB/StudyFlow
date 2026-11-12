@@ -317,15 +317,15 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
   );
 
   return (
-    <div className="h-full overflow-y-auto p-3 sm:p-5 lg:p-6 sf-env-canvas">
-      <div className="max-w-7xl mx-auto space-y-4 sm:space-y-5">
+    <div className="h-full overflow-y-auto p-2.5 sm:p-4 xl:p-6 sf-env-canvas">
+      <div className="max-w-7xl mx-auto space-y-3 sm:space-y-4">
         {/* Barra superior minimalista de estado y navegación interna */}
-        <div className="bg-slate-900/90 backdrop-blur-md border border-indigo-500/25 rounded-2xl px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 bg-slate-950/80 p-1 rounded-xl border border-indigo-500/25">
+        <div className="bg-slate-900/90 backdrop-blur-md border border-indigo-500/25 rounded-2xl px-3 py-2 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-1.5 bg-slate-950/80 p-1 rounded-xl border border-indigo-500/25">
             <button
               type="button"
               onClick={() => setPlannerView('session')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 plannerView === 'session'
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -337,14 +337,15 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
             <button
               type="button"
               onClick={() => setPlannerView('setup')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 plannerView === 'setup'
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
               <Sliders className="w-3.5 h-3.5" />
-              <span>Configurar Plan y Ciclos</span>
+              <span className="sm:hidden">Configurar</span>
+              <span className="hidden sm:inline">Configurar Plan y Ciclos</span>
             </button>
           </div>
 
@@ -382,10 +383,10 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
 
         {plannerView === 'session' ? (
           /* ================= VISTA 1: ENFOQUE Y RUTA (CALMA Y CLARA) ================= */
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-4 xl:gap-5 items-start">
             {/* IZQUIERDA: RELOJ POMODORO LIMPIO + CAMBIO RÁPIDO */}
-            <div data-tour-id="tour-pomodoro-clock" className="lg:col-span-5 space-y-4">
-              <div className="bg-slate-900/95 backdrop-blur-md border border-indigo-500/25 sf-accent-glow rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col items-center">
+            <div data-tour-id="tour-pomodoro-clock" className="lg:col-span-5 space-y-3 sm:space-y-4">
+              <div className="bg-slate-900/95 backdrop-blur-md border border-indigo-500/25 sf-accent-glow rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col items-center">
                 {/* Selector Estudio | Descanso Corto | Descanso Largo */}
                 <div className="flex flex-wrap items-center justify-center gap-1.5 bg-slate-950/85 p-1 rounded-xl border border-indigo-500/25 mb-4">
                   <button
@@ -477,7 +478,7 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
                 )}
 
                 {/* Aro del reloj */}
-                <div className="relative w-52 h-52 sm:w-56 sm:h-56 flex items-center justify-center my-1">
+                <div className="relative w-40 h-40 sm:w-44 sm:h-44 xl:w-52 xl:h-52 flex items-center justify-center my-0.5">
                   <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
                     <circle
                       cx="50"
@@ -509,7 +510,7 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
                   </svg>
 
                   <div className="absolute flex flex-col items-center justify-center text-center px-4">
-                    <span className="text-5xl font-extrabold tracking-tight font-mono text-white">
+                    <span className="text-4xl xl:text-5xl font-extrabold tracking-tight font-mono text-white">
                       {formattedClock}
                     </span>
                     <span className="text-[11px] font-medium uppercase tracking-widest text-indigo-400 mt-1.5">

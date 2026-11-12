@@ -117,13 +117,13 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       {/* Toolbar */}
       <div
         data-tour-id="tour-kanban-toolbar"
-        className="min-h-14 py-2 border-b border-slate-800 bg-slate-900/90 px-4 flex flex-wrap items-center justify-between gap-3 flex-shrink-0 z-20"
+        className="min-h-12 py-1.5 sm:py-2 border-b border-slate-800 bg-slate-900/90 px-2.5 sm:px-4 flex flex-wrap items-center justify-between gap-2 sm:gap-3 flex-shrink-0 z-20"
       >
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
           <div className="flex items-center gap-2">
-            <LayoutGrid className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-sm font-bold text-white tracking-tight">
-              Pizarra de Notas y Apuntes
+            <LayoutGrid className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" />
+            <h2 className="text-xs sm:text-sm font-bold text-white tracking-tight">
+              Pizarra de Apuntes
             </h2>
           </div>
 
@@ -133,7 +133,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               setFilterFolderId(e.target.value);
               setFilterDocId('all');
             }}
-            className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+            className="flex-1 sm:flex-none bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[11px] sm:text-xs text-slate-200 focus:outline-none focus:border-indigo-500 min-w-[120px]"
           >
             <option value="all">Todas las carpetas</option>
             <option value="unassigned">Sin carpeta</option>
@@ -147,7 +147,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
           <select
             value={filterDocId}
             onChange={(e) => setFilterDocId(e.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 max-w-[220px]"
+            className="flex-1 sm:flex-none bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-[11px] sm:text-xs text-slate-200 focus:outline-none focus:border-indigo-500 sm:max-w-[190px] min-w-[120px]"
           >
             <option value="all">Todos los documentos</option>
             {documents.map((doc) => (
@@ -158,30 +158,31 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
           </select>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={() => setShowCreateModal(true)}
-            className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 flex items-center gap-1.5 transition-colors"
+            className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs font-medium text-slate-200 flex items-center gap-1.5 transition-colors"
           >
-            <Plus className="w-4 h-4 text-indigo-400" />
+            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400" />
             <span>Nueva Nota</span>
           </button>
 
           <button
             type="button"
             onClick={() => void handleExportPdf()}
-            className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white flex items-center gap-1.5 transition-colors shadow-sm"
+            className="px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-[11px] sm:text-xs font-semibold text-white flex items-center gap-1.5 transition-colors shadow-sm"
           >
-            <Download className="w-4 h-4" />
-            <span>Exportar Apuntes a PDF</span>
+            <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="sm:hidden">PDF</span>
+            <span className="hidden sm:inline">Exportar PDF</span>
           </button>
         </div>
       </div>
 
       {/* Columnas Kanban */}
-      <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 sf-env-canvas">
-        <div className="h-full grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+      <div className="flex-1 overflow-y-auto p-2.5 sm:p-4 xl:p-5 sf-env-canvas">
+        <div className="h-full grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
           {ZONES.map((zone) => {
             const zoneNotes = visibleNotes.filter((n) => (n.zone || 'ideas') === zone.id);
             const isOver = dragOverZone === zone.id;
