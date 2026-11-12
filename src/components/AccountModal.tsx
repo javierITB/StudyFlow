@@ -112,9 +112,9 @@ export const AccountModal: React.FC<AccountModalProps> = ({
             <p className="text-slate-400 leading-relaxed">
               Para activar cuentas multi-estudiante en Vercel, ejecuta{' '}
               <code className="text-indigo-300">supabase/schema.sql</code> en tu proyecto
-              Supabase y agrega <code className="text-indigo-300">VITE_SUPABASE_URL</code>{' '}
-              y <code className="text-indigo-300">VITE_SUPABASE_PUBLISHABLE_KEY</code> (o{' '}
-              <code className="text-indigo-300">VITE_SUPABASE_ANON_KEY</code>) en tus
+              Supabase y agrega <code className="text-indigo-300">SUPABASE_URL</code>{' '}
+              y <code className="text-indigo-300">SUPABASE_PUBLISHABLE_KEY</code> (o{' '}
+              <code className="text-indigo-300">SUPABASE_ANON_KEY</code>) en tus
               variables de entorno.
             </p>
           </div>
@@ -161,11 +161,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   setAuthMode('login');
                   setErrorMsg(null);
                 }}
-                className={`py-1.5 rounded-lg font-semibold ${
-                  authMode === 'login'
+                className={`py-1.5 rounded-lg font-semibold ${authMode === 'login'
                     ? 'bg-indigo-600 text-white'
                     : 'text-slate-400 hover:text-white'
-                }`}
+                  }`}
               >
                 Iniciar Sesión
               </button>
@@ -175,11 +174,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   setAuthMode('register');
                   setErrorMsg(null);
                 }}
-                className={`py-1.5 rounded-lg font-semibold ${
-                  authMode === 'register'
+                className={`py-1.5 rounded-lg font-semibold ${authMode === 'register'
                     ? 'bg-indigo-600 text-white'
                     : 'text-slate-400 hover:text-white'
-                }`}
+                  }`}
               >
                 Crear Cuenta
               </button>
