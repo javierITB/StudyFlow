@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import { DOMParser as XmlDomParser } from '@xmldom/xmldom';
-import { computeStageHorizontalMargins, detectDocumentType } from '../documentUtils';
+import {
+  computeStageHorizontalMargins,
+  computeTouchNavigationAction,
+  detectDocumentType,
+} from '../documentUtils';
 import { parsePptxDocument } from '../pptxParser';
 
 describe('Document format detection & PPTX parsing', () => {
@@ -168,5 +172,73 @@ describe('Document format detection & PPTX parsing', () => {
     expect(interactive.rightMargin).toBeGreaterThanOrEqual(240);
     expect(interactive.hasMarginOverhang).toBe(false);
   });
+
+  it('determina correctamente acciones táctiles de swipe y tap en bordes para tablets', () => {
+    const containerWidth = 800;
+
+    // Deslizar a la izquierda (swipe left) -> Siguiente página ('next')
+    expect(
+      computeTouchNavigationAction(
+        { x: 500, y: 300, time: 1000 },
+        { x: 380, y: 305, time: 1200 },
+        containerWidth
+      )
+    ).toBe('next');
+
+    // Deslizar a la derecha (swipe right) -> Página anterior ('prev')
+    expect(
+      computeTouchNavigationAction(
+        { x: 200, y: 300, time: 1000 },
+        { x: 340, y: 310, time: 1220 },
+        containerWidth
+      )
+    ).toBe('prev');
+
+    // Desplazamiento vertical (scroll para leer página larga) -> No debe cambiar página ('none')
+    expect(
+      computeTouchNavigationAction(
+        { x: 400, y: 500, time: 1000 },
+        { x: 420, y: 250, time: 1200 },
+        containerWidth
+      )
+    ).toBe('none');
+
+    // Pulsar (tap limpio) en el borde derecho (ej: x = 720 sobre 800 -> 90%) -> 'next'
+    expect(
+      computeTouchNavigationAction(
+        { x: 720, y: 350, time: 1000 },
+        { x: 722, y: 351, time: 1120 },
+        containerWidth
+      )
+    ).toBe('next');
+
+    // Pulsar (tap limpio) en el borde izquierdo (ej: x = 80 sobre 800 -> 10%) -> 'prev'
+    expect(
+      computeTouchNavigationAction(
+        { x: 80, y: 350, time: 1000 },
+        { x: 82, y: 349, time: 1110 },
+        containerWidth
+      )
+    ).toBe('prev');
+
+    // Pulsar en el centro (lectura o selección de texto, x = 400 -> 50%) -> 'none'
+    expect(
+      computeTouchNavigationAction(
+        { x: 400, y: 350, time: 1000 },
+        { x: 402, y: 351, time: 1150 },
+        containerWidth
+      )
+    ).toBe('none');
+
+    // Pulsación prolongada (long press / seleccionar texto > 350ms) -> 'none'
+    expect(
+      computeTouchNavigationAction(
+        { x: 720, y: 350, time: 1000 },
+        { x: 722, y: 350, time: 1500 },
+        containerWidth
+      )
+    ).toBe('none');
+  });
 });
+
 

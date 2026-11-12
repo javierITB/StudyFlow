@@ -20,6 +20,23 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
+export function mapNoteRow(n: Record<string, unknown>): StickyNoteRecord {
+  return {
+    id: String(n.id),
+    docId: (n.doc_id as string | null) || null,
+    page: (n.page as number | null) ?? null,
+    xRatio: (n.x_ratio as number | null) ?? null,
+    yRatio: (n.y_ratio as number | null) ?? null,
+    content: String(n.content || ''),
+    color: ((n.color as string) || 'yellow') as NoteColor,
+    zone: ((n.zone as string) || 'ideas') as KanbanZone,
+    createdAt: String(n.created_at || new Date().toISOString()),
+    userId: (n.user_id as string | undefined) || undefined,
+    authorUsername: (n.author_username as string | null) ?? null,
+    isShared: Boolean(n.is_shared),
+  };
+}
+
 export async function fetchCloudSnapshot(userId: string): Promise<{
   folders: FolderRecord[];
   documents: DocumentRecord[];
@@ -27,6 +44,8 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
   tasks: TaskRecord[];
   studySettings: StudySettings;
   planState: PersistedPlanState | null;
+  username: string | null;
+  fullName: string | null;
 }> {
   if (!supabase) {
     throw new Error('Supabase no configurado');
@@ -36,9 +55,13 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
     await Promise.all([
       supabase.from('folders').select('*').eq('user_id', userId).order('created_at'),
       supabase.from('documents').select('*').eq('user_id', userId).order('upload_date'),
-      supabase.from('notes').select('*').eq('user_id', userId).order('created_at'),
+      supabase.from('notes').select('*').order('created_at'),
       supabase.from('tasks').select('*').eq('user_id', userId).order('created_at'),
-      supabase.from('profiles').select('study_settings').eq('id', userId).maybeSingle(),
+      supabase
+        .from('profiles')
+        .select('study_settings, username, full_name')
+        .eq('id', userId)
+        .maybeSingle(),
       supabase
         .from('study_plans')
         .select('plan_data')
@@ -76,17 +99,9 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
     });
   }
 
-  const notes: StickyNoteRecord[] = (notesRes.data || []).map((n) => ({
-    id: n.id,
-    docId: n.doc_id || null,
-    page: n.page ?? null,
-    xRatio: n.x_ratio ?? null,
-    yRatio: n.y_ratio ?? null,
-    content: n.content || '',
-    color: (n.color || 'yellow') as NoteColor,
-    zone: (n.zone || 'ideas') as KanbanZone,
-    createdAt: n.created_at,
-  }));
+  const notes: StickyNoteRecord[] = (notesRes.data || []).map((n) =>
+    mapNoteRow(n as Record<string, unknown>)
+  );
 
   const tasks: TaskRecord[] = (tasksRes.data || []).map((t) => ({
     id: t.id,
@@ -116,6 +131,8 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
     tasks,
     studySettings,
     planState,
+    username: (profileRes.data?.username as string | null) ?? null,
+    fullName: (profileRes.data?.full_name as string | null) ?? null,
   };
 }
 
@@ -214,7 +231,7 @@ export async function cloudUpsertNote(userId: string, note: StickyNoteRecord): P
   if (!supabase) return;
   const { error } = await supabase.from('notes').upsert({
     id: note.id,
-    user_id: userId,
+    user_id: note.userId || userId,
     doc_id: note.docId,
     page: note.page,
     x_ratio: note.xRatio,
@@ -222,18 +239,16 @@ export async function cloudUpsertNote(userId: string, note: StickyNoteRecord): P
     content: note.content,
     color: note.color,
     zone: note.zone,
+    is_shared: Boolean(note.isShared),
+    author_username: note.authorUsername ?? null,
     created_at: note.createdAt,
   });
   if (error) throw error;
 }
 
-export async function cloudDeleteNote(userId: string, noteId: string): Promise<void> {
+export async function cloudDeleteNote(_userId: string, noteId: string): Promise<void> {
   if (!supabase) return;
-  const { error } = await supabase
-    .from('notes')
-    .delete()
-    .eq('id', noteId)
-    .eq('user_id', userId);
+  const { error } = await supabase.from('notes').delete().eq('id', noteId);
   if (error) throw error;
 }
 

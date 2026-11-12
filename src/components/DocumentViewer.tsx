@@ -15,7 +15,9 @@ import {
   Columns2,
   FastForward,
   Gauge,
+  Globe,
   Loader2,
+  Lock,
   Maximize2,
   MessageSquare,
   Minimize2,
@@ -27,11 +29,14 @@ import {
   Play,
   Plus,
   Route,
+  Share2,
   StickyNote,
   Trash2,
+  Users,
   X,
 } from 'lucide-react';
 import {
+  CollaboratorPresence,
   DiagnosticData,
   DocumentRecord,
   DocumentType,
@@ -44,7 +49,11 @@ import {
   StudySettings,
 } from '../types/studyflow';
 import { formatDurationCompact } from '../lib/diagnosticEngine';
-import { computeStageHorizontalMargins } from '../lib/documentUtils';
+import {
+  computeStageHorizontalMargins,
+  computeTouchNavigationAction,
+} from '../lib/documentUtils';
+import { canDeleteNote, canEditNote } from '../lib/collaboration';
 import { formatErrorMessageEs } from '../lib/errorMessages';
 import type { DocxPage } from '../lib/docxParser';
 import type { ParsedPptxPresentation } from '../lib/pptxParser';
@@ -77,6 +86,10 @@ interface DocumentViewerProps {
   onNotify: (msg: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  currentUserId?: string | null;
+  currentUsername?: string | null;
+  collaboratorsPresence?: CollaboratorPresence[];
+  onShareDocument?: (doc: DocumentRecord) => void;
 }
 
 const NOTE_COLORS: Array<{ id: NoteColor; label: string; dotClass: string }> = [
@@ -111,6 +124,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   onNotify,
   sidebarOpen = true,
   onToggleSidebar,
+  currentUserId = null,
+  currentUsername = null,
+  collaboratorsPresence = [],
+  onShareDocument,
 }) => {
   const {
     mode,
@@ -164,6 +181,49 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [livePendingSeconds, setLivePendingSeconds] = useState<number>(0);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [dockCollapsed, setDockCollapsed] = useState<boolean>(false);
+  const [newNoteShared, setNewNoteShared] = useState<boolean>(true);
+  const isViewerOnly = activeDoc?.sharedRole === 'viewer';
+  const isCollaborativeDoc = Boolean(
+    activeDoc &&
+      (activeDoc.sharedRole === 'collaborator' ||
+        activeDoc.sharedRole === 'viewer' ||
+        collaboratorsPresence.length > 1 ||
+        notes.some((n) => n.docId === activeDoc.id && n.isShared))
+  );
+
+  useEffect(() => {
+    setNewNoteShared(true);
+  }, [activeDoc?.id]);
+  const [pageTurnFeedback, setPageTurnFeedback] = useState<{
+    direction: 'prev' | 'next';
+    page: number;
+  } | null>(null);
+  const feedbackTimerRef = useRef<number | null>(null);
+  const touchStartRef = useRef<{
+    x: number;
+    y: number;
+    time: number;
+    target: EventTarget | null;
+  } | null>(null);
+  const touchMovedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimerRef.current) {
+        window.clearTimeout(feedbackTimerRef.current);
+      }
+    };
+  }, []);
+
+  const triggerPageTurnFeedback = (direction: 'prev' | 'next', pageNum: number) => {
+    if (feedbackTimerRef.current) {
+      window.clearTimeout(feedbackTimerRef.current);
+    }
+    setPageTurnFeedback({ direction, page: pageNum });
+    feedbackTimerRef.current = window.setTimeout(() => {
+      setPageTurnFeedback(null);
+    }, 850);
+  };
 
   const lastActivityRef = useRef<number>(Date.now());
   const pendingDiagnosticSecRef = useRef<number>(0);
@@ -831,6 +891,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       onNotify('Abre un documento primero para agregar notas', 'warning');
       return;
     }
+    if (isViewerOnly) {
+      onNotify('Tienes permiso de solo lectura en este documento compartido.', 'warning');
+      return;
+    }
     const coords = computeNextMarginCoords(pageNotes);
     await onCreateNote({
       docId: activeDoc.id,
@@ -840,6 +904,9 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       content: '',
       color: selectedColor,
       zone: 'ideas',
+      userId: currentUserId || undefined,
+      authorUsername: currentUsername || null,
+      isShared: isCollaborativeDoc ? newNoteShared : false,
     });
     onNotify('Nota creada en el margen sin tapar el documento', 'success');
   };
@@ -920,7 +987,99 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     const next = Math.min(Math.max(1, currentPage + delta), Math.max(1, totalPages));
     if (next !== currentPage) {
       onChangePage(activeDoc.id, next);
+      triggerPageTurnFeedback(delta > 0 ? 'next' : 'prev', next);
     }
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!activeDoc) return;
+    if (e.touches.length !== 1) {
+      touchStartRef.current = null;
+      return;
+    }
+    if (stickyMode || dragStateRef.current) return;
+
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest(
+        '.sticky-note-element, button, input, textarea, select, [data-no-swipe]'
+      )
+    ) {
+      touchStartRef.current = null;
+      return;
+    }
+
+    touchStartRef.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+      time: Date.now(),
+      target,
+    };
+    touchMovedRef.current = false;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!touchStartRef.current) return;
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const deltaX = currentX - touchStartRef.current.x;
+    const deltaY = currentY - touchStartRef.current.y;
+    if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
+      touchMovedRef.current = true;
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!touchStartRef.current || !activeDoc) {
+      touchStartRef.current = null;
+      return;
+    }
+    if (stickyMode || dragStateRef.current) {
+      touchStartRef.current = null;
+      return;
+    }
+
+    // Si el usuario está seleccionando texto, evitar cambio de página
+    if (
+      typeof window !== 'undefined' &&
+      window.getSelection()?.toString().trim()
+    ) {
+      touchStartRef.current = null;
+      return;
+    }
+
+    const container = scrollContainerRef.current;
+    if (!container) {
+      touchStartRef.current = null;
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const touch = e.changedTouches[0];
+
+    const action = computeTouchNavigationAction(
+      {
+        x: touchStartRef.current.x - containerRect.left,
+        y: touchStartRef.current.y - containerRect.top,
+        time: touchStartRef.current.time,
+      },
+      {
+        x: touch.clientX - containerRect.left,
+        y: touch.clientY - containerRect.top,
+        time: Date.now(),
+      },
+      containerRect.width
+    );
+
+    const pageStep = hasSecondaryPage ? 2 : 1;
+
+    if (action === 'next' && currentPage < totalPages) {
+      stepPage(pageStep);
+    } else if (action === 'prev' && currentPage > 1) {
+      stepPage(-pageStep);
+    }
+
+    touchStartRef.current = null;
   };
 
   const handleJumpToPage = (rawValue: string) => {
@@ -942,6 +1101,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const handleToggleStickyMode = () => {
     if (!activeDoc) {
       onNotify('Abre un documento primero para fijar notas', 'warning');
+      return;
+    }
+    if (isViewerOnly) {
+      onNotify('Tienes permiso de solo lectura en este documento compartido.', 'warning');
       return;
     }
     pendingAnchorSheetLeftRef.current = sheetRef.current?.getBoundingClientRect().left ?? null;
@@ -1021,13 +1184,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         return;
       }
 
-      if (!isFullscreen || isEditingText || !activeDoc || mode !== 'study') return;
+      if (isEditingText || !activeDoc || mode !== 'study') return;
+      const pageStep = hasSecondaryPage ? 2 : 1;
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        if (currentPage > 1) onChangePage(activeDoc.id, currentPage - 1);
+        if (currentPage > 1) stepPage(-pageStep);
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        if (currentPage < totalPages) onChangePage(activeDoc.id, currentPage + 1);
+        if (currentPage < totalPages) stepPage(pageStep);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -1039,6 +1203,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     activeDoc,
     currentPage,
     totalPages,
+    hasSecondaryPage,
     mode,
     onChangePage,
   ]);
@@ -1128,6 +1293,9 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       content: '',
       color: selectedColor,
       zone: 'ideas',
+      userId: currentUserId || undefined,
+      authorUsername: currentUsername || null,
+      isShared: isCollaborativeDoc ? newNoteShared : false,
     });
 
     setStickyMode(false);
@@ -1272,6 +1440,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     const isDragging = draggingNoteId === note.id;
     const isHighlighted = highlightedNoteId === note.id;
     const isInsideSheet = x > -0.04 && x < 0.96;
+    const editable = canEditNote(note, currentUserId);
+    const deletable = canDeleteNote(note, activeDoc, currentUserId);
 
     return (
       <div
@@ -1295,15 +1465,55 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         }`}
       >
         <div
-          onPointerDown={(e) => startDraggingNote(e, note.id, targetSheetEl)}
-          className="flex items-center justify-between pb-1 mb-1 border-b border-black/10 text-[10px] font-semibold select-none cursor-grab active:cursor-grabbing touch-none"
-          title="Arrastra hacia los márgenes laterales o sobre el documento"
+          onPointerDown={(e) => {
+            if (editable) startDraggingNote(e, note.id, targetSheetEl);
+          }}
+          className={`flex items-center justify-between gap-1 pb-1 mb-1 border-b border-black/10 text-[10px] font-semibold select-none ${
+            editable ? 'cursor-grab active:cursor-grabbing touch-none' : ''
+          }`}
+          title={
+            editable
+              ? 'Arrastra hacia los márgenes laterales o sobre el documento'
+              : `Nota compartida de @${note.authorUsername || 'compañero'}`
+          }
         >
-          <span>
-            {activeDoc?.fileType === 'pptx' ? 'Slide' : 'Pág.'} {note.page}
-          </span>
-          <div className="flex items-center gap-0.5">
-            {isInsideSheet && (
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="flex-shrink-0">
+              {activeDoc?.fileType === 'pptx' ? 'Slide' : 'Pág.'} {note.page}
+            </span>
+            {note.isShared && note.authorUsername && (
+              <span className="truncate px-1 py-0.2 rounded bg-black/10 text-[9px] font-mono">
+                @{note.authorUsername}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            {editable && (isCollaborativeDoc || note.isShared) && (
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onUpdateNote(note.id, {
+                    isShared: !note.isShared,
+                    authorUsername: currentUsername || note.authorUsername || null,
+                  });
+                }}
+                title={
+                  note.isShared
+                    ? 'Nota compartida (clic para hacerla privada)'
+                    : 'Nota privada (clic para compartir)'
+                }
+                className="opacity-75 hover:opacity-100 p-0.5 rounded hover:bg-black/10"
+              >
+                {note.isShared ? (
+                  <Globe className="w-3 h-3" />
+                ) : (
+                  <Lock className="w-3 h-3" />
+                )}
+              </button>
+            )}
+            {editable && isInsideSheet && (
               <button
                 type="button"
                 onPointerDown={(e) => e.stopPropagation()}
@@ -1318,23 +1528,27 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 <span>Margen</span>
               </button>
             )}
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                void onDeleteNote(note.id);
-              }}
-              title="Eliminar nota"
-              className="opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-black/10"
-            >
-              <X className="w-3 h-3" />
-            </button>
+            {deletable && (
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onDeleteNote(note.id);
+                }}
+                title="Eliminar nota"
+                className="opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-black/10"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </div>
         </div>
         <textarea
           value={draftTexts[note.id] ?? note.content}
+          readOnly={!editable}
           onChange={(e) => {
+            if (!editable) return;
             const val = e.target.value;
             setDraftTexts((prev) => ({ ...prev, [note.id]: val }));
             const existingTimer = saveTimersRef.current.get(note.id);
@@ -1346,6 +1560,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             saveTimersRef.current.set(note.id, timerId);
           }}
           onBlur={(e) => {
+            if (!editable) return;
             const existingTimer = saveTimersRef.current.get(note.id);
             if (existingTimer) {
               window.clearTimeout(existingTimer);
@@ -1356,19 +1571,20 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             }
           }}
           rows={3}
-          placeholder="Escribe un apunte..."
+          placeholder={editable ? 'Escribe un apunte...' : ''}
           className="w-full bg-transparent resize-none border-0 p-0 text-xs focus:outline-none placeholder-black/40 leading-snug"
         />
         <div className="mt-1 pt-1 border-t border-black/10 flex items-center justify-between text-[9px]">
           <select
             value={note.zone}
+            disabled={!editable}
             onPointerDown={(e) => e.stopPropagation()}
             onChange={(e) =>
               void onUpdateNote(note.id, {
                 zone: e.target.value as KanbanZone,
               })
             }
-            className="bg-black/10 rounded px-1 py-0.5 font-semibold focus:outline-none cursor-pointer"
+            className="bg-black/10 rounded px-1 py-0.5 font-semibold focus:outline-none cursor-pointer disabled:opacity-70 disabled:cursor-default"
             title="Clasificación en Pizarra Kanban"
           >
             <option value="ideas">Ideas Clave</option>
@@ -1381,11 +1597,12 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               <button
                 key={c.id}
                 type="button"
+                disabled={!editable}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => void onUpdateNote(note.id, { color: c.id })}
                 className={`w-2.5 h-2.5 rounded-full ${c.dotClass} border ${
                   note.color === c.id ? 'border-slate-900 scale-110' : 'border-black/20 opacity-70'
-                }`}
+                } disabled:cursor-default`}
                 title={c.label}
               />
             ))}
@@ -1440,7 +1657,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             <button
               type="button"
               disabled={!activeDoc || currentPage <= 1}
-              onClick={() => stepPage(-1)}
+              onClick={() => stepPage(hasSecondaryPage ? -2 : -1)}
               title="Página anterior"
               className="p-1 xl:p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 disabled:opacity-30 disabled:pointer-events-none transition-colors"
             >
@@ -1467,7 +1684,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             <button
               type="button"
               disabled={!activeDoc || currentPage >= totalPages}
-              onClick={() => stepPage(1)}
+              onClick={() => stepPage(hasSecondaryPage ? 2 : 1)}
               title="Página siguiente"
               className="p-1 xl:p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/25 hover:border-indigo-400/55 text-slate-200 disabled:opacity-30 disabled:pointer-events-none transition-colors"
             >
@@ -1560,11 +1777,42 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               ))}
             </div>
 
+            {isCollaborativeDoc && !isViewerOnly && (
+              <button
+                type="button"
+                onClick={() => setNewNoteShared((v) => !v)}
+                title={
+                  newNoteShared
+                    ? 'Las nuevas notas serán visibles para la sesión colaborativa (clic para hacerlas privadas)'
+                    : 'Las nuevas notas serán solo para ti (clic para compartir por defecto)'
+                }
+                className={`px-2 py-1 rounded-lg text-[11px] font-medium border flex items-center gap-1 transition-colors ${
+                  newNoteShared
+                    ? 'border-emerald-500/45 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25'
+                    : 'border-amber-500/45 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25'
+                }`}
+              >
+                {newNoteShared ? (
+                  <Globe className="w-3.5 h-3.5" />
+                ) : (
+                  <Lock className="w-3.5 h-3.5" />
+                )}
+                <span className="hidden xl:inline">
+                  {newNoteShared ? 'Compartida' : 'Privada'}
+                </span>
+              </button>
+            )}
+
             <button
               type="button"
+              disabled={isViewerOnly}
               onClick={() => void handleAddMarginNote()}
-              title="Crear nota directamente en el margen lateral sin tapar el texto"
-              className="px-2 xl:px-2.5 py-1 rounded-lg text-[11px] xl:text-xs font-medium border border-indigo-500/45 bg-indigo-500/20 hover:bg-indigo-500/35 text-indigo-200 flex items-center gap-1 transition-colors"
+              title={
+                isViewerOnly
+                  ? 'Solo lectura en este documento compartido'
+                  : 'Crear nota directamente en el margen lateral sin tapar el texto'
+              }
+              className="px-2 xl:px-2.5 py-1 rounded-lg text-[11px] xl:text-xs font-medium border border-indigo-500/45 bg-indigo-500/20 hover:bg-indigo-500/35 text-indigo-200 flex items-center gap-1 transition-colors disabled:opacity-40 disabled:pointer-events-none"
             >
               <Plus className="w-3.5 h-3.5" />
               <span className="hidden lg:inline xl:hidden">Margen</span>
@@ -1573,9 +1821,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
             <button
               type="button"
+              disabled={isViewerOnly}
               onClick={handleToggleStickyMode}
-              title="Fijar nota donde hagas clic o toque"
-              className={`px-2 xl:px-2.5 py-1 rounded-lg text-[11px] xl:text-xs font-medium flex items-center gap-1 transition-colors ${
+              title={
+                isViewerOnly
+                  ? 'Solo lectura en este documento compartido'
+                  : 'Fijar nota donde hagas clic o toque'
+              }
+              className={`px-2 xl:px-2.5 py-1 rounded-lg text-[11px] xl:text-xs font-medium flex items-center gap-1 transition-colors disabled:opacity-40 disabled:pointer-events-none ${
                 stickyMode
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'border border-slate-700 bg-slate-800 text-slate-300 hover:text-white'
@@ -1589,6 +1842,18 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 {stickyMode ? 'Fijar Activo' : 'Pegar Nota'}
               </span>
             </button>
+
+            {activeDoc && onShareDocument && (!activeDoc.sharedRole || activeDoc.sharedRole === 'owner') && (
+              <button
+                type="button"
+                onClick={() => onShareDocument(activeDoc)}
+                title="Compartir copia o iniciar sesión colaborativa"
+                className="px-2 xl:px-2.5 py-1 rounded-lg text-[11px] xl:text-xs font-medium border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 flex items-center gap-1 transition-colors"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span className="hidden xl:inline">Compartir</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -1796,6 +2061,48 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           </div>
         )}
 
+      {/* Barra de Sesión Colaborativa y Presencia en vivo */}
+      {!isFullscreen && activeDoc && isCollaborativeDoc && (
+        <div className="px-3 py-1.5 border-b border-emerald-500/25 bg-emerald-950/20 flex flex-wrap items-center justify-between gap-2 text-[11px] z-20 flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            <span className="inline-flex items-center gap-1 font-semibold text-emerald-300">
+              <Users className="w-3.5 h-3.5" />
+              <span>Sesión colaborativa</span>
+            </span>
+            {activeDoc.ownerUsername && activeDoc.sharedRole && activeDoc.sharedRole !== 'owner' && (
+              <span className="text-slate-400">
+                · De <strong className="text-slate-200">@{activeDoc.ownerUsername}</strong> (
+                {isViewerOnly ? 'Solo lectura' : 'Colaborador'})
+              </span>
+            )}
+            {collaboratorsPresence.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {collaboratorsPresence.map((peer) => (
+                  <button
+                    key={peer.userId}
+                    type="button"
+                    onClick={() => onChangePage(activeDoc.id, peer.page)}
+                    title={`@${peer.username} está viendo la página ${peer.page} (clic para ir)`}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-emerald-500/35 text-emerald-200 hover:border-emerald-400 transition-colors"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span className="font-mono text-[10px]">
+                      @{peer.username}
+                      {peer.userId === currentUserId ? ' (tú)' : ''} · p.{peer.page}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {!isViewerOnly && (
+            <span className="text-[10px] text-slate-400 hidden sm:inline">
+              Notas nuevas compartidas por defecto (puedes ponerlas privadas con el candado)
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Barra activa de Modo Diagnostico */}
       {diagnosticData.isActive && (
         <div className="px-3 py-1.5 border-b border-emerald-500/30 bg-emerald-950/30 flex flex-wrap items-center justify-between gap-2 text-xs z-20">
@@ -1844,6 +2151,9 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         <div className="flex-1 relative flex flex-col overflow-hidden">
           <div
             ref={scrollContainerRef}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
             className={`flex-1 flex flex-col sf-env-canvas ${
               lockHorizontalScroll
                 ? 'overflow-y-auto overflow-x-hidden touch-pan-y overscroll-x-none items-center'
@@ -2116,6 +2426,62 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           )}
           </div>
 
+          {/* Botones ergonómicos táctiles laterales para tablet y PC */}
+          {activeDoc && !isLoadingBuffer && !isParsingDoc && !parseError && (
+            <>
+              {/* Lateral izquierdo: Página anterior */}
+              <button
+                type="button"
+                data-no-swipe="true"
+                disabled={currentPage <= 1}
+                onClick={() => stepPage(hasSecondaryPage ? -2 : -1)}
+                title="Página anterior (o pulsa el borde izquierdo / desliza a la derecha)"
+                aria-label="Página anterior"
+                className={`absolute left-1 sm:left-3 top-1/2 -translate-y-1/2 z-20 group flex items-center justify-center w-7 sm:w-10 h-16 sm:h-24 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 active:scale-95 border border-indigo-500/25 hover:border-indigo-400/60 backdrop-blur-md text-slate-300 hover:text-white shadow-xl transition-all duration-200 select-none ${
+                  currentPage <= 1
+                    ? 'opacity-0 pointer-events-none'
+                    : 'opacity-40 hover:opacity-100 focus:opacity-100'
+                }`}
+              >
+                <ChevronLeft className="w-4 h-4 sm:w-6 sm:h-6 group-hover:-translate-x-0.5 transition-transform" />
+              </button>
+
+              {/* Lateral derecho: Página siguiente */}
+              <button
+                type="button"
+                data-no-swipe="true"
+                disabled={currentPage >= totalPages}
+                onClick={() => stepPage(hasSecondaryPage ? 2 : 1)}
+                title="Página siguiente (o pulsa el borde derecho / desliza a la izquierda)"
+                aria-label="Página siguiente"
+                className={`absolute right-1 sm:right-3 top-1/2 -translate-y-1/2 z-20 group flex items-center justify-center w-7 sm:w-10 h-16 sm:h-24 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 active:scale-95 border border-indigo-500/25 hover:border-indigo-400/60 backdrop-blur-md text-slate-300 hover:text-white shadow-xl transition-all duration-200 select-none ${
+                  currentPage >= totalPages
+                    ? 'opacity-0 pointer-events-none'
+                    : 'opacity-40 hover:opacity-100 focus:opacity-100'
+                }`}
+              >
+                <ChevronRight className="w-4 h-4 sm:w-6 sm:h-6 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </>
+          )}
+
+          {/* Indicador flotante (HUD) de paso de página al usar gestos o toques */}
+          {pageTurnFeedback && activeDoc && (
+            <div className="pointer-events-none absolute top-3 sm:top-5 inset-x-0 z-40 flex justify-center animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/95 border border-indigo-500/40 backdrop-blur-md shadow-2xl text-slate-100 text-xs font-medium">
+                {pageTurnFeedback.direction === 'prev' ? (
+                  <ChevronLeft className="w-4 h-4 text-indigo-400 animate-pulse" />
+                ) : null}
+                <span className="font-mono">
+                  {activeDoc.fileType === 'pptx' ? 'Slide' : 'Pág.'} {pageTurnFeedback.page} / {totalPages}
+                </span>
+                {pageTurnFeedback.direction === 'next' ? (
+                  <ChevronRight className="w-4 h-4 text-indigo-400 animate-pulse" />
+                ) : null}
+              </div>
+            </div>
+          )}
+
           {/* Barra de controles flotante en la zona inferior (en Modo Inmersivo, o en móvil para zoom/páginas rápidas) */}
           {activeDoc && mode === 'study' && !transitionPrompt && (
             <div
@@ -2128,7 +2494,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                   <button
                     type="button"
                     disabled={currentPage <= 1}
-                    onClick={() => stepPage(-1)}
+                    onClick={() => stepPage(hasSecondaryPage ? -2 : -1)}
                     title="Página anterior"
                     className="p-1 rounded-full hover:bg-slate-800 text-slate-300 disabled:opacity-30 disabled:pointer-events-none"
                   >
@@ -2140,7 +2506,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                   <button
                     type="button"
                     disabled={currentPage >= totalPages}
-                    onClick={() => stepPage(1)}
+                    onClick={() => stepPage(hasSecondaryPage ? 2 : 1)}
                     title="Página siguiente"
                     className="p-1 rounded-full hover:bg-slate-800 text-slate-300 disabled:opacity-30 disabled:pointer-events-none"
                   >
@@ -2198,7 +2564,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     <button
                       type="button"
                       disabled={currentPage <= 1}
-                      onClick={() => stepPage(-1)}
+                      onClick={() => stepPage(hasSecondaryPage ? -2 : -1)}
                       title="Página anterior"
                       className="p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/30 hover:border-indigo-400/60 text-slate-200 disabled:opacity-30 disabled:pointer-events-none transition-colors"
                     >
@@ -2225,7 +2591,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     <button
                       type="button"
                       disabled={currentPage >= totalPages}
-                      onClick={() => stepPage(1)}
+                      onClick={() => stepPage(hasSecondaryPage ? 2 : 1)}
                       title="Página siguiente"
                       className="p-1.5 rounded-lg bg-slate-800/90 hover:bg-indigo-500/20 border border-indigo-500/30 hover:border-indigo-400/60 text-slate-200 disabled:opacity-30 disabled:pointer-events-none transition-colors"
                     >
@@ -2504,25 +2870,58 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 (railFilter === 'page' ? pageNotes : docNotes).map((note) => {
                   const isInsideSheet =
                     (note.xRatio ?? 0.5) > -0.04 && (note.xRatio ?? 0.5) < 0.96;
+                  const editable = canEditNote(note, currentUserId);
+                  const deletable = canDeleteNote(note, activeDoc, currentUserId);
                   return (
                     <div
                       key={note.id}
                       className={`p-2.5 rounded-xl border note-${note.color} flex flex-col gap-1.5 shadow-sm`}
                     >
-                      <div className="flex items-center justify-between text-[10px] font-semibold border-b border-black/10 pb-1">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            note.page && onChangePage(activeDoc.id, note.page)
-                          }
-                          className="hover:underline font-mono"
-                        >
-                          {note.page
-                            ? `${activeDoc.fileType === 'pptx' ? 'Slide' : 'Pág.'} ${note.page}`
-                            : 'General'}
-                        </button>
-                        <div className="flex items-center gap-1">
-                          {isInsideSheet && note.page === currentPage && (
+                      <div className="flex items-center justify-between text-[10px] font-semibold border-b border-black/10 pb-1 gap-1">
+                        <div className="flex items-center gap-1 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              note.page && onChangePage(activeDoc.id, note.page)
+                            }
+                            className="hover:underline font-mono flex-shrink-0"
+                          >
+                            {note.page
+                              ? `${activeDoc.fileType === 'pptx' ? 'Slide' : 'Pág.'} ${note.page}`
+                              : 'General'}
+                          </button>
+                          {note.isShared && note.authorUsername && (
+                            <span className="truncate px-1 rounded bg-black/10 text-[9px] font-mono">
+                              @{note.authorUsername}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {editable && (isCollaborativeDoc || note.isShared) && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void onUpdateNote(note.id, {
+                                  isShared: !note.isShared,
+                                  authorUsername:
+                                    currentUsername || note.authorUsername || null,
+                                })
+                              }
+                              className="p-0.5 rounded hover:bg-black/15"
+                              title={
+                                note.isShared
+                                  ? 'Nota compartida (clic para hacerla privada)'
+                                  : 'Nota privada (clic para compartir)'
+                              }
+                            >
+                              {note.isShared ? (
+                                <Globe className="w-3 h-3" />
+                              ) : (
+                                <Lock className="w-3 h-3" />
+                              )}
+                            </button>
+                          )}
+                          {editable && isInsideSheet && note.page === currentPage && (
                             <button
                               type="button"
                               onClick={() => void handleMoveNoteToMargin(note)}
@@ -2532,20 +2931,24 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                               Al margen
                             </button>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => void onDeleteNote(note.id)}
-                            className="p-0.5 rounded hover:bg-black/15"
-                            title="Eliminar nota"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
+                          {deletable && (
+                            <button
+                              type="button"
+                              onClick={() => void onDeleteNote(note.id)}
+                              className="p-0.5 rounded hover:bg-black/15"
+                              title="Eliminar nota"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
                         </div>
                       </div>
 
                       <textarea
                         value={draftTexts[note.id] ?? note.content}
+                        readOnly={!editable}
                         onChange={(e) => {
+                          if (!editable) return;
                           const val = e.target.value;
                           setDraftTexts((prev) => ({ ...prev, [note.id]: val }));
                           const existingTimer = saveTimersRef.current.get(note.id);
@@ -2557,6 +2960,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                           saveTimersRef.current.set(note.id, timerId);
                         }}
                         onBlur={(e) => {
+                          if (!editable) return;
                           const existingTimer = saveTimersRef.current.get(note.id);
                           if (existingTimer) {
                             window.clearTimeout(existingTimer);
@@ -2567,19 +2971,20 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                           }
                         }}
                         rows={3}
-                        placeholder="Escribe un apunte..."
+                        placeholder={editable ? 'Escribe un apunte...' : ''}
                         className="w-full bg-transparent resize-none border-0 p-0 text-xs focus:outline-none placeholder-black/40 leading-snug"
                       />
 
                       <div className="flex items-center justify-between pt-1 border-t border-black/10 text-[9px]">
                         <select
                           value={note.zone}
+                          disabled={!editable}
                           onChange={(e) =>
                             void onUpdateNote(note.id, {
                               zone: e.target.value as KanbanZone,
                             })
                           }
-                          className="bg-black/10 rounded px-1 py-0.5 font-semibold focus:outline-none"
+                          className="bg-black/10 rounded px-1 py-0.5 font-semibold focus:outline-none disabled:opacity-70"
                         >
                           <option value="ideas">Ideas Clave</option>
                           <option value="preguntas">Preguntas</option>

@@ -229,3 +229,66 @@ export function computeStageHorizontalMargins({
     hasMarginOverhang: leftOverhang > 0 || rightOverhang > 0,
   };
 }
+
+export interface TouchNavigationPoint {
+  x: number;
+  y: number;
+  time: number;
+}
+
+export type TouchNavigationAction = 'next' | 'prev' | 'none';
+
+export interface TouchNavigationOptions {
+  swipeThresholdPx?: number;
+  swipeVelocityRatio?: number;
+  maxSwipeDurationMs?: number;
+  maxTapDurationMs?: number;
+  maxTapMovementPx?: number;
+  tapEdgeRatio?: number;
+}
+
+export function computeTouchNavigationAction(
+  start: TouchNavigationPoint,
+  end: TouchNavigationPoint,
+  containerWidth: number,
+  options: TouchNavigationOptions = {}
+): TouchNavigationAction {
+  const swipeThresholdPx = options.swipeThresholdPx ?? 42;
+  const swipeVelocityRatio = options.swipeVelocityRatio ?? 1.35;
+  const maxSwipeDurationMs = options.maxSwipeDurationMs ?? 650;
+  const maxTapDurationMs = options.maxTapDurationMs ?? 350;
+  const maxTapMovementPx = options.maxTapMovementPx ?? 12;
+  const tapEdgeRatio = options.tapEdgeRatio ?? 0.22;
+
+  const deltaX = end.x - start.x;
+  const deltaY = end.y - start.y;
+  const elapsed = Math.max(0, end.time - start.time);
+
+  // 1. Gesto de deslizamiento horizontal (Swipe)
+  const isHorizontalSwipe =
+    Math.abs(deltaX) >= swipeThresholdPx &&
+    Math.abs(deltaX) > Math.abs(deltaY) * swipeVelocityRatio &&
+    elapsed <= maxSwipeDurationMs;
+
+  if (isHorizontalSwipe) {
+    return deltaX < 0 ? 'next' : 'prev';
+  }
+
+  // 2. Pulsación táctil limpia en bordes izquierdo o derecho (Tap Navigation)
+  const isCleanTap =
+    Math.abs(deltaX) <= maxTapMovementPx &&
+    Math.abs(deltaY) <= maxTapMovementPx &&
+    elapsed <= maxTapDurationMs;
+
+  if (isCleanTap && containerWidth > 0) {
+    if (end.x <= containerWidth * tapEdgeRatio) {
+      return 'prev';
+    }
+    if (end.x >= containerWidth * (1 - tapEdgeRatio)) {
+      return 'next';
+    }
+  }
+
+  return 'none';
+}
+

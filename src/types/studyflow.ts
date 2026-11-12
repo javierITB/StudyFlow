@@ -20,6 +20,10 @@ export interface DocumentRecord {
   uploadDate: string;
   storagePath?: string | null;
   data?: ArrayBuffer;
+  ownerId?: string;
+  ownerUsername?: string | null;
+  sharedRole?: 'owner' | 'collaborator' | 'viewer';
+  shareId?: string;
 }
 
 export type NoteColor = 'yellow' | 'cyan' | 'green' | 'lavender';
@@ -36,6 +40,9 @@ export interface StickyNoteRecord {
   color: NoteColor;
   zone: KanbanZone;
   createdAt: string;
+  userId?: string;
+  authorUsername?: string | null;
+  isShared?: boolean;
 }
 
 export interface TaskRecord {
@@ -255,5 +262,86 @@ export interface UserProfile {
   id: string;
   email: string;
   fullName: string;
+  username: string | null;
 }
+
+export interface PublicProfile {
+  id: string;
+  username: string | null;
+  fullName: string;
+}
+
+export type FriendshipStatus = 'pending' | 'accepted' | 'rejected' | 'blocked';
+
+export interface FriendshipRecord {
+  id: string;
+  requesterId: string;
+  addresseeId: string;
+  status: FriendshipStatus;
+  createdAt: string;
+  updatedAt: string;
+  peer?: PublicProfile;
+}
+
+export type ShareMode = 'copy' | 'collaborative';
+export type ShareRole = 'viewer' | 'collaborator';
+export type ShareStatus = 'pending' | 'accepted' | 'revoked';
+
+export interface DocumentShareRecord {
+  id: string;
+  docId: string;
+  ownerId: string;
+  recipientId: string;
+  shareMode: ShareMode;
+  includeNotes: boolean;
+  role: ShareRole;
+  status: ShareStatus;
+  createdAt: string;
+  updatedAt: string;
+  docName?: string;
+  fileType?: DocumentType;
+  pageCount?: number;
+  storagePath?: string | null;
+  size?: number;
+  ownerProfile?: PublicProfile;
+  recipientProfile?: PublicProfile;
+}
+
+export interface ShareLinkRecord {
+  id: string;
+  token: string;
+  docId: string;
+  ownerId: string;
+  shareMode: ShareMode;
+  includeNotes: boolean;
+  role: ShareRole;
+  revoked: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface RedeemedShareLinkResult {
+  shareId: string;
+  docId: string;
+  docName: string;
+  fileType: DocumentType;
+  size: number;
+  pageCount: number;
+  storagePath: string | null;
+  ownerId: string;
+  ownerUsername: string | null;
+  shareMode: ShareMode;
+  includeNotes: boolean;
+  role: ShareRole;
+  status: ShareStatus;
+}
+
+export interface CollaboratorPresence {
+  userId: string;
+  username: string;
+  fullName: string;
+  page: number;
+  onlineAt: string;
+}
+
 

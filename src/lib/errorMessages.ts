@@ -107,11 +107,43 @@ const MESSAGE_PATTERN_MAP: Array<[RegExp, string | ((m: RegExpMatchArray) => str
     /relation ".*" does not exist|could not find the table/i,
     'Faltan tablas en Supabase: ejecuta el script supabase/schema.sql en el SQL Editor de tu proyecto.',
   ],
+  [
+    /could not find the function.*(is_username_available|resolve_login_email|search_public_profiles|redeem_share_link)|column .*username.* does not exist/i,
+    'Falta actualizar tu base de datos Supabase: ejecuta supabase/migration_v2_collaboration.sql en el SQL Editor.',
+  ],
   [/auth session missing/i, 'No hay una sesión activa en este momento.'],
   [/jwt expired|invalid jwt/i, 'Tu sesión expiró. Vuelve a iniciar sesión para continuar.'],
   [
     /invalid api key|no api key found/i,
     'La clave pública de Supabase (.env) es inválida o no se cargó. Reinicia el servidor tras revisar .env.',
+  ],
+  [
+    /profiles_username_lower_idx|duplicate key.*username/i,
+    'Ese nombre de usuario ya está registrado. Elige otro distinto.',
+  ],
+  [
+    /profiles_username_format_check/i,
+    'El nombre de usuario debe tener entre 3 y 24 caracteres (minúsculas a-z, números 0-9 o guión bajo).',
+  ],
+  [
+    /friendships_pair_unique_idx/i,
+    'Ya tienes una solicitud pendiente o ya eres amigo de este estudiante.',
+  ],
+  [
+    /ENLACE_INVALIDO_O_EXPIRADO/i,
+    'Este enlace de invitación expiró, fue revocado o no existe.',
+  ],
+  [
+    /PROPIO_DOCUMENTO/i,
+    'Este enlace corresponde a un documento que ya es tuyo.',
+  ],
+  [
+    /DOCUMENTO_NO_ENCONTRADO/i,
+    'El documento original compartido fue eliminado o ya no está disponible.',
+  ],
+  [
+    /DEBES_INICIAR_SESION/i,
+    'Inicia sesión o regístrate para aceptar este documento compartido.',
   ],
   [
     /row-level security policy|permission denied/i,

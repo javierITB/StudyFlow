@@ -14,9 +14,11 @@ import {
   PanelLeftClose,
   Presentation,
   Route,
+  Share2,
   Sliders,
   Trash2,
   UploadCloud,
+  Users,
 } from 'lucide-react';
 import {
   DocumentRecord,
@@ -31,6 +33,7 @@ import { RouteTimeline } from './RouteTimeline';
 interface DocumentSidebarProps {
   folders: FolderRecord[];
   documents: DocumentRecord[];
+  sharedDocuments?: DocumentRecord[];
   activeDocId: string | null;
   speedMinPerPage: number;
   isUploading: boolean;
@@ -43,6 +46,7 @@ interface DocumentSidebarProps {
   onOpenDocument: (docId: string) => void;
   onMoveDocumentToFolder: (docId: string, folderId: string | null) => Promise<void>;
   onDeleteDocument: (doc: DocumentRecord) => void;
+  onShareDocument?: (doc: DocumentRecord) => void;
   onStartRouteStep: (step: RouteStep, nextStep: RouteStep | null) => void;
   onToggleStepCompleted: (stepId: string) => Promise<void>;
   onOpenPlannerTab: () => void;
@@ -69,6 +73,7 @@ function formatAcademicTime(pages: number, speedMinPerPage: number): string {
 export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   folders,
   documents,
+  sharedDocuments = [],
   activeDocId,
   speedMinPerPage,
   isUploading,
@@ -81,6 +86,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   onOpenDocument,
   onMoveDocumentToFolder,
   onDeleteDocument,
+  onShareDocument,
   onStartRouteStep,
   onToggleStepCompleted,
   onOpenPlannerTab,
@@ -241,6 +247,19 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
             </div>
 
             <div className="flex items-center gap-0.5 flex-shrink-0">
+              {onShareDocument && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onShareDocument(doc);
+                  }}
+                  title="Compartir documento o iniciar sesión colaborativa"
+                  className="p-1.5 sm:p-1 rounded text-slate-400 hover:text-emerald-300 hover:bg-slate-800 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={(e) => {
@@ -505,7 +524,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
 
           {/* Arbol vertical de Folders tipo archivador con hojas hacia abajo */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
-            {documents.length === 0 && folders.length === 0 ? (
+            {documents.length === 0 && folders.length === 0 && sharedDocuments.length === 0 ? (
               <div className="text-center py-8 px-4 text-slate-400">
                 <Folder className="w-9 h-9 mx-auto text-slate-600 mb-2" />
                 <p className="text-xs font-medium text-slate-400">
@@ -718,6 +737,86 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                           <div className="pl-2.5 border-l-2 border-indigo-500/35 space-y-1.5">
                             {unassignedDocs.map((doc) => renderDocumentLeaf(doc))}
                           </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sesiones colaborativas compartidas conmigo */}
+                {sharedDocuments.length > 0 && (
+                  <div>
+                    <div className="flex items-end pl-1">
+                      <div className="h-1.5 w-16 rounded-t-md bg-emerald-500/60" />
+                    </div>
+                    <div className="rounded-xl rounded-tl-none border border-emerald-500/30 bg-emerald-950/15 overflow-hidden">
+                      <div
+                        onClick={() =>
+                          setCollapsedFolders((prev) => ({
+                            ...prev,
+                            shared_with_me: !prev.shared_with_me,
+                          }))
+                        }
+                        className="p-2.5 flex items-center justify-between gap-2 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {collapsedFolders['shared_with_me'] ? (
+                            <ChevronRight className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                          )}
+                          <Users className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-white truncate">
+                              Compartidos conmigo
+                            </div>
+                            <div className="text-[10px] text-emerald-300/80">
+                              {sharedDocuments.length}{' '}
+                              {sharedDocuments.length === 1
+                                ? 'sesión colaborativa'
+                                : 'sesiones colaborativas'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {!collapsedFolders['shared_with_me'] && (
+                        <div className="px-2.5 pb-2.5 pt-1 bg-slate-950/45 border-t border-emerald-500/20 space-y-1.5">
+                          {sharedDocuments.map((sDoc) => {
+                            const isActive = sDoc.id === activeDocId;
+                            return (
+                              <div
+                                key={sDoc.id}
+                                onClick={() => {
+                                  onOpenDocument(sDoc.id);
+                                  onCloseDrawer?.();
+                                }}
+                                className={`p-2 rounded-lg border cursor-pointer transition-all ${
+                                  isActive
+                                    ? 'bg-emerald-500/15 border-emerald-400/60'
+                                    : 'bg-slate-900/80 border-slate-800 hover:border-emerald-500/40'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <div className="min-w-0 flex items-center gap-1.5">
+                                    <FileText className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                                    <span className="text-xs font-medium text-white truncate">
+                                      {sDoc.name}
+                                    </span>
+                                  </div>
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex-shrink-0">
+                                    {sDoc.sharedRole === 'collaborator'
+                                      ? 'Colaborador'
+                                      : 'Lectura'}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5 flex items-center justify-between">
+                                  <span>De @{sDoc.ownerUsername || 'compañero'}</span>
+                                  <span>{sDoc.pageCount} págs</span>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>

@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppearanceSettings,
+  CollaboratorPresence,
   DiagnosticCriterion,
   DiagnosticData,
   DiagnosticRecommendation,
   DocumentRecord,
+  DocumentShareRecord,
   DocumentType,
   FolderColor,
   FolderRecord,
+  FriendshipRecord,
   PersistedPlanState,
   RouteSegment,
   RouteStep,
@@ -69,6 +72,27 @@ import { DiagnosticModal } from './components/DiagnosticModal';
 import { AppearanceModal } from './components/AppearanceModal';
 import { TutorialOverlay } from './components/TutorialOverlay';
 import { AuthWelcomeModal } from './components/AuthWelcomeModal';
+import { UsernameOnboardingModal } from './components/UsernameOnboardingModal';
+import { NotificationsBell } from './components/NotificationsBell';
+import { FriendsAndSharesModal } from './components/FriendsAndSharesModal';
+import { ShareDocumentModal } from './components/ShareDocumentModal';
+import {
+  acceptDocumentCopy,
+  extractShareTokenFromSearch,
+  fetchFriendships,
+  fetchIncomingShares,
+  fetchNotesForDocument,
+  fetchSharedDocumentsWithMe,
+  redeemShareLink,
+  removeFriendship,
+  resolveEmailForLogin,
+  respondFriendRequest,
+  sendFriendRequest,
+  subscribeToDocumentCollaboration,
+  subscribeToSocialNotifications,
+  updateMyUsername,
+  updateShareStatusOrRole,
+} from './lib/collaboration';
 
 const DEFAULT_DIAGNOSTIC_DATA: DiagnosticData = {
   isActive: false,
@@ -89,6 +113,8 @@ interface WorkspaceShellProps {
   setCurrentModule: (m: AppModule) => void;
   folders: FolderRecord[];
   documents: DocumentRecord[];
+  sharedDocuments: DocumentRecord[];
+  collaboratorsPresence: CollaboratorPresence[];
   notes: StickyNoteRecord[];
   tasks: TaskRecord[];
   studySettings: StudySettings;
@@ -102,6 +128,9 @@ interface WorkspaceShellProps {
   user: UserProfile | null;
   syncStatus: 'local' | 'synced' | 'syncing' | 'error';
   onOpenAccountModal: () => void;
+  onOpenFriendsModal: () => void;
+  onShareDocument: (doc: DocumentRecord) => void;
+  notificationsSlot?: React.ReactNode;
   onOpenAppearanceModal: () => void;
   onToggleAudio: () => Promise<void>;
   onCreateFolder: (name: string, color: FolderColor) => Promise<void>;
@@ -144,6 +173,8 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   setCurrentModule,
   folders,
   documents,
+  sharedDocuments,
+  collaboratorsPresence,
   notes,
   tasks,
   studySettings,
@@ -157,6 +188,9 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   user,
   syncStatus,
   onOpenAccountModal,
+  onOpenFriendsModal,
+  onShareDocument,
+  notificationsSlot,
   onOpenAppearanceModal,
   onToggleAudio,
   onCreateFolder,
@@ -190,8 +224,11 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   const { startRouteStep, activeRouteStep } = useTimer();
 
   const activeDoc = useMemo(
-    () => documents.find((d) => d.id === activeDocId) || null,
-    [documents, activeDocId]
+    () =>
+      documents.find((d) => d.id === activeDocId) ||
+      sharedDocuments.find((d) => d.id === activeDocId) ||
+      null,
+    [documents, sharedDocuments, activeDocId]
   );
 
   const handleStartRouteStepInViewer = useCallback(
@@ -232,8 +269,10 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
         user={user}
         syncStatus={syncStatus}
         onOpenAccountModal={onOpenAccountModal}
+        onOpenFriendsModal={onOpenFriendsModal}
         onOpenAppearanceModal={onOpenAppearanceModal}
         onOpenTutorial={onOpenTutorial}
+        notificationsSlot={notificationsSlot}
       />
 
       <main className="flex-1 overflow-hidden relative">
@@ -255,6 +294,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
               <DocumentSidebar
                 folders={folders}
                 documents={documents}
+                sharedDocuments={sharedDocuments}
                 activeDocId={activeDocId}
                 speedMinPerPage={studySettings.speedMinPerPage}
                 isUploading={isUploading}
@@ -272,6 +312,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 }}
                 onMoveDocumentToFolder={onMoveDocumentToFolder}
                 onDeleteDocument={onDeleteDocument}
+                onShareDocument={user ? onShareDocument : undefined}
                 onStartRouteStep={(step, next) =>
                   void handleStartRouteStepInViewer(step, next)
                 }
@@ -304,6 +345,10 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
               onNotify={onNotify}
               sidebarOpen={sidebarOpen}
               onToggleSidebar={() => onSetSidebarOpen((v) => !v)}
+              currentUserId={user?.id || null}
+              currentUsername={user?.username || null}
+              collaboratorsPresence={collaboratorsPresence}
+              onShareDocument={user ? onShareDocument : undefined}
             />
           </div>
         )}
@@ -373,9 +418,23 @@ export const App: React.FC = () => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
 
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [profileLoadedFromCloud, setProfileLoadedFromCloud] = useState<boolean>(false);
+  const [usernamePromptDismissed, setUsernamePromptDismissed] = useState<boolean>(false);
   const [syncStatus, setSyncStatus] = useState<'local' | 'synced' | 'syncing' | 'error'>(
     'local'
   );
+  const [sharedDocuments, setSharedDocuments] = useState<DocumentRecord[]>([]);
+  const [friendships, setFriendships] = useState<FriendshipRecord[]>([]);
+  const [incomingShares, setIncomingShares] = useState<DocumentShareRecord[]>([]);
+  const [collaboratorsPresence, setCollaboratorsPresence] = useState<
+    CollaboratorPresence[]
+  >([]);
+  const [friendsModalOpen, setFriendsModalOpen] = useState<boolean>(false);
+  const [shareDocTarget, setShareDocTarget] = useState<DocumentRecord | null>(null);
+  const collabHandleRef = useRef<{
+    updatePage: (page: number) => void;
+    unsubscribe: () => void;
+  } | null>(null);
   const [accountModalOpen, setAccountModalOpen] = useState<boolean>(false);
   const [diagnosticModalOpen, setDiagnosticModalOpen] = useState<boolean>(false);
   const [appearanceModalOpen, setAppearanceModalOpen] = useState<boolean>(false);
@@ -503,6 +562,21 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  const refreshSocialData = useCallback(async (userId: string) => {
+    try {
+      const [fr, sh, sDocs] = await Promise.all([
+        fetchFriendships(userId),
+        fetchIncomingShares(userId),
+        fetchSharedDocumentsWithMe(userId),
+      ]);
+      setFriendships(fr);
+      setIncomingShares(sh);
+      setSharedDocuments(sDocs);
+    } catch {
+      // Silenciar si aún no se aplica la migración v2 en Supabase
+    }
+  }, []);
+
   const hydrateFromCloud = useCallback(
     async (profile: UserProfile) => {
       setSyncStatus('syncing');
@@ -512,6 +586,17 @@ export const App: React.FC = () => {
         setDocuments(cloud.documents);
         setNotes(cloud.notes);
         setTasks(cloud.tasks);
+        setUser((prev) =>
+          prev && prev.id === profile.id
+            ? {
+                ...prev,
+                username: cloud.username,
+                fullName: cloud.fullName || prev.fullName,
+              }
+            : prev
+        );
+        setProfileLoadedFromCloud(true);
+
         const resolvedCloudSettings: StudySettings = {
           ...cloud.studySettings,
           appearance: resolveAppearance(cloud.studySettings.appearance),
@@ -537,6 +622,7 @@ export const App: React.FC = () => {
           setSetting('planState', resolvedPlan),
         ]);
 
+        void refreshSocialData(profile.id);
         setSyncStatus('synced');
       } catch (err) {
         console.error('Error sincronizando con Supabase:', err);
@@ -550,12 +636,22 @@ export const App: React.FC = () => {
         );
       }
     },
-    [notify]
+    [notify, refreshSocialData]
   );
 
-  // Carga inicial + listener de sesion Supabase
+  // Carga inicial + listener de sesion Supabase + detección de enlace ?share=
   useEffect(() => {
     void hydrateFromLocal();
+
+    if (typeof window !== 'undefined') {
+      const shareToken = extractShareTokenFromSearch(window.location.search);
+      if (shareToken) {
+        window.sessionStorage.setItem('sf_pending_share_token', shareToken);
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('share');
+        window.history.replaceState({}, '', cleanUrl.toString());
+      }
+    }
 
     if (!isSupabaseConfigured || !supabase) return;
 
@@ -569,9 +665,19 @@ export const App: React.FC = () => {
             (sUser.user_metadata?.full_name as string | undefined) ||
             sUser.email?.split('@')[0] ||
             'Estudiante',
+          username:
+            (sUser.user_metadata?.username as string | undefined) || null,
         };
         setUser(profile);
+        setAuthWelcomeOpen(false);
         void hydrateFromCloud(profile);
+      } else if (
+        typeof window !== 'undefined' &&
+        window.sessionStorage.getItem('sf_pending_share_token')
+      ) {
+        setAuthWelcomeOpen(false);
+        setAccountModalOpen(true);
+        notify('Inicia sesión o regístrate para abrir el enlace compartido', 'info');
       }
     });
 
@@ -585,11 +691,19 @@ export const App: React.FC = () => {
             (sUser.user_metadata?.full_name as string | undefined) ||
             sUser.email?.split('@')[0] ||
             'Estudiante',
+          username:
+            (sUser.user_metadata?.username as string | undefined) || null,
         };
         setUser(profile);
+        setAuthWelcomeOpen(false);
         void hydrateFromCloud(profile);
       } else {
         setUser(null);
+        setProfileLoadedFromCloud(false);
+        setSharedDocuments([]);
+        setFriendships([]);
+        setIncomingShares([]);
+        setCollaboratorsPresence([]);
         setSyncStatus('local');
       }
     });
@@ -597,7 +711,18 @@ export const App: React.FC = () => {
     return () => {
       listener.subscription.unsubscribe();
     };
-  }, [hydrateFromLocal, hydrateFromCloud]);
+  }, [hydrateFromLocal, hydrateFromCloud, notify]);
+
+  // Suscripción silenciosa Realtime a solicitudes de amistad y documentos compartidos
+  useEffect(() => {
+    if (!user?.id || !isSupabaseConfigured) return;
+    return subscribeToSocialNotifications({
+      userId: user.id,
+      onRefreshNeeded: () => {
+        void refreshSocialData(user.id);
+      },
+    });
+  }, [user?.id, refreshSocialData]);
 
   const runCloudMutation = useCallback(
     async (task: (userId: string) => Promise<void>) => {
@@ -625,7 +750,10 @@ export const App: React.FC = () => {
 
       try {
         const stored = await dbGet<DocumentRecord>('documents', docId);
-        const meta = documents.find((d) => d.id === docId) || stored;
+        const sharedMeta = sharedDocuments.find((d) => d.id === docId);
+        const ownMeta = documents.find((d) => d.id === docId);
+        const meta = ownMeta || sharedMeta || stored;
+        const isSharedDoc = Boolean(sharedMeta && !ownMeta);
 
         if (pageOverride && meta) {
           const clampedPage = Math.min(
@@ -633,16 +761,30 @@ export const App: React.FC = () => {
             Math.max(1, meta.pageCount)
           );
           if (meta.currentPage !== clampedPage) {
-            const updated: DocumentRecord = {
-              ...(stored || meta),
-              currentPage: clampedPage,
-            };
-            setDocuments((prev) =>
-              prev.map((d) => (d.id === docId ? { ...d, currentPage: clampedPage } : d))
-            );
-            await dbPut('documents', updated);
-            void runCloudMutation((uid) => cloudUpsertDocument(uid, updated));
+            if (isSharedDoc) {
+              setSharedDocuments((prev) =>
+                prev.map((d) => (d.id === docId ? { ...d, currentPage: clampedPage } : d))
+              );
+            } else {
+              const updated: DocumentRecord = {
+                ...(stored || meta),
+                currentPage: clampedPage,
+              };
+              setDocuments((prev) =>
+                prev.map((d) => (d.id === docId ? { ...d, currentPage: clampedPage } : d))
+              );
+              await dbPut('documents', updated);
+              void runCloudMutation((uid) => cloudUpsertDocument(uid, updated));
+            }
           }
+        }
+
+        if (isSharedDoc && userRef.current) {
+          const docNotes = await fetchNotesForDocument(docId);
+          setNotes((prev) => {
+            const others = prev.filter((n) => n.docId !== docId);
+            return [...others, ...docNotes];
+          });
         }
 
         if (!sameDocAlreadyLoaded) {
@@ -666,7 +808,7 @@ export const App: React.FC = () => {
         setIsLoadingBuffer(false);
       }
     },
-    [activeDocId, activeBuffer, documents, notify, runCloudMutation]
+    [activeDocId, activeBuffer, documents, sharedDocuments, notify, runCloudMutation]
   );
 
   const highlightTimerRef = useRef<number | null>(null);
@@ -687,15 +829,39 @@ export const App: React.FC = () => {
 
   const handleChangePage = useCallback(
     async (docId: string, page: number) => {
+      const isSharedDoc =
+        sharedDocuments.some((d) => d.id === docId) &&
+        !documents.some((d) => d.id === docId);
+
+      if (isSharedDoc) {
+        let clampedShared = page;
+        setSharedDocuments((prev) =>
+          prev.map((d) => {
+            if (d.id !== docId) return d;
+            clampedShared = Math.min(Math.max(1, page), Math.max(1, d.pageCount));
+            return { ...d, currentPage: clampedShared };
+          })
+        );
+        if (docId === activeDocId) {
+          collabHandleRef.current?.updatePage(clampedShared);
+        }
+        return;
+      }
+
       let updatedDoc: DocumentRecord | null = null;
+      let clampedOwn = page;
       setDocuments((prev) =>
         prev.map((d) => {
           if (d.id !== docId) return d;
-          const clamped = Math.min(Math.max(1, page), Math.max(1, d.pageCount));
-          updatedDoc = { ...d, currentPage: clamped };
+          clampedOwn = Math.min(Math.max(1, page), Math.max(1, d.pageCount));
+          updatedDoc = { ...d, currentPage: clampedOwn };
           return updatedDoc;
         })
       );
+
+      if (docId === activeDocId) {
+        collabHandleRef.current?.updatePage(clampedOwn);
+      }
 
       const stored = await dbGet<DocumentRecord>('documents', docId);
       if (stored) {
@@ -707,7 +873,7 @@ export const App: React.FC = () => {
         void runCloudMutation((uid) => cloudUpsertDocument(uid, updatedDoc!));
       }
     },
-    [runCloudMutation]
+    [activeDocId, documents, sharedDocuments, runCloudMutation]
   );
 
   const handleUploadFiles = useCallback(
@@ -1085,21 +1251,35 @@ export const App: React.FC = () => {
   );
 
   // Autenticacion y respaldo JSON
-  const handleSignIn = async (email: string, password: string) => {
+  const handleSignIn = async (identifier: string, password: string) => {
     if (!supabase) return;
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const resolvedEmail = await resolveEmailForLogin(identifier);
+    if (!resolvedEmail) {
+      throw new Error(
+        'No encontramos ninguna cuenta con ese correo o @usuario.'
+      );
+    }
+    const { error } = await supabase.auth.signInWithPassword({
+      email: resolvedEmail,
+      password,
+    });
     if (error) {
       throw new Error(formatErrorMessageEs(error, 'Error al iniciar sesión'));
     }
     notify('Sesión iniciada correctamente', 'success');
   };
 
-  const handleSignUp = async (email: string, password: string, fullName: string) => {
+  const handleSignUp = async (
+    email: string,
+    password: string,
+    fullName: string,
+    username: string
+  ) => {
     if (!supabase) return;
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: fullName } },
+      options: { data: { full_name: fullName, username } },
     });
     if (error) {
       throw new Error(formatErrorMessageEs(error, 'Error al registrar la cuenta'));
@@ -1113,20 +1293,102 @@ export const App: React.FC = () => {
     );
   };
 
+  const handleUpdateUsername = async (username: string) => {
+    if (!user) return;
+    const saved = await updateMyUsername(user.id, username);
+    setUser((prev) => (prev ? { ...prev, username: saved } : prev));
+    notify(`Tu @usuario es ahora @${saved}`, 'success');
+  };
+
   const handleSignOut = async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
     await clearAllLocalData();
     setFolders([]);
     setDocuments([]);
+    setSharedDocuments([]);
+    setFriendships([]);
+    setIncomingShares([]);
+    setCollaboratorsPresence([]);
     setNotes([]);
     setTasks([]);
     setActiveDocId(null);
     setActiveBuffer(null);
     setUser(null);
+    setProfileLoadedFromCloud(false);
     setSyncStatus('local');
     setAccountModalOpen(false);
     notify('Sesión cerrada y caché local limpiada', 'info');
+  };
+
+  // Acciones sociales y compartición
+  const handleSendFriendRequest = async (addresseeId: string) => {
+    if (!user) return;
+    await sendFriendRequest(user.id, addresseeId);
+    await refreshSocialData(user.id);
+    notify('Solicitud de amistad enviada', 'success');
+  };
+
+  const handleAcceptFriend = async (friendshipId: string) => {
+    if (!user) return;
+    await respondFriendRequest(friendshipId, 'accepted');
+    await refreshSocialData(user.id);
+    notify('Solicitud de amistad aceptada', 'success');
+  };
+
+  const handleRejectOrRemoveFriend = async (friendshipId: string) => {
+    if (!user) return;
+    await removeFriendship(friendshipId);
+    await refreshSocialData(user.id);
+    notify('Vínculo actualizado', 'info');
+  };
+
+  const handleAcceptCopyShare = async (
+    share: DocumentShareRecord,
+    targetFolderId: string | null
+  ) => {
+    if (!user) return;
+    const { newDoc, copiedNotes } = await acceptDocumentCopy({
+      shareId: share.id,
+      sourceDocId: share.docId,
+      docName: share.docName || 'Documento compartido',
+      fileType: share.fileType || 'pdf',
+      size: share.size || 0,
+      pageCount: share.pageCount || 1,
+      storagePath: share.storagePath || null,
+      includeNotes: share.includeNotes,
+      recipientId: user.id,
+      targetFolderId,
+    });
+    setDocuments((prev) => [...prev, newDoc]);
+    if (copiedNotes.length > 0) {
+      setNotes((prev) => [...prev, ...copiedNotes]);
+    }
+    await refreshSocialData(user.id);
+    notify(
+      `Copia guardada: "${newDoc.name}"${
+        copiedNotes.length > 0 ? ` (+${copiedNotes.length} notas)` : ''
+      }`,
+      'success'
+    );
+    await handleOpenDocument(newDoc.id, 1);
+    setCurrentModule('docs');
+  };
+
+  const handleAcceptCollaborativeShare = async (share: DocumentShareRecord) => {
+    if (!user) return;
+    await updateShareStatusOrRole(share.id, { status: 'accepted' });
+    await refreshSocialData(user.id);
+    notify(`Te uniste a la sesión colaborativa de "${share.docName}"`, 'success');
+    await handleOpenDocument(share.docId, 1);
+    setCurrentModule('docs');
+  };
+
+  const handleDismissOrLeaveShare = async (shareId: string) => {
+    if (!user) return;
+    await updateShareStatusOrRole(shareId, { status: 'revoked' });
+    await refreshSocialData(user.id);
+    notify('Elemento compartido descartado', 'info');
   };
 
   const handleExportBackup = () => {
@@ -1378,9 +1640,94 @@ export const App: React.FC = () => {
   );
 
   const activeDoc = useMemo(
-    () => documents.find((d) => d.id === activeDocId) || null,
-    [documents, activeDocId]
+    () =>
+      documents.find((d) => d.id === activeDocId) ||
+      sharedDocuments.find((d) => d.id === activeDocId) ||
+      null,
+    [documents, sharedDocuments, activeDocId]
   );
+
+  // Canje automático de enlace compartido (?share=TOKEN) tras iniciar sesión
+  useEffect(() => {
+    if (!user?.id || !profileLoadedFromCloud || !isSupabaseConfigured) return;
+    if (typeof window === 'undefined') return;
+    const pendingToken = window.sessionStorage.getItem('sf_pending_share_token');
+    if (!pendingToken) return;
+
+    window.sessionStorage.removeItem('sf_pending_share_token');
+    void (async () => {
+      try {
+        const result = await redeemShareLink(pendingToken);
+        await refreshSocialData(user.id);
+        if (result.shareMode === 'collaborative') {
+          notify(
+            `Te uniste a la sesión colaborativa de "${result.docName}"`,
+            'success'
+          );
+          await handleOpenDocument(result.docId, 1);
+          setCurrentModule('docs');
+        } else {
+          notify(
+            `Copia de "${result.docName}" lista para guardar en tu biblioteca.`,
+            'info'
+          );
+          setFriendsModalOpen(true);
+        }
+      } catch (err) {
+        notify(
+          formatErrorMessageEs(err, 'No se pudo abrir el enlace compartido'),
+          'warning'
+        );
+      }
+    })();
+  }, [user?.id, profileLoadedFromCloud, refreshSocialData, handleOpenDocument, notify]);
+
+  // Suscripción Realtime de notas y presencia para el documento activo
+  useEffect(() => {
+    collabHandleRef.current?.unsubscribe();
+    collabHandleRef.current = null;
+    setCollaboratorsPresence([]);
+
+    if (!user?.id || !activeDocId || !isSupabaseConfigured) return;
+
+    const currentDoc =
+      documents.find((d) => d.id === activeDocId) ||
+      sharedDocuments.find((d) => d.id === activeDocId);
+
+    const handle = subscribeToDocumentCollaboration({
+      docId: activeDocId,
+      userId: user.id,
+      username: user.username || user.fullName || 'estudiante',
+      fullName: user.fullName || 'Estudiante',
+      initialPage: currentDoc?.currentPage || 1,
+      onNoteUpsert: (incomingNote) => {
+        setNotes((prev) => {
+          const exists = prev.some((n) => n.id === incomingNote.id);
+          if (exists) {
+            return prev.map((n) => (n.id === incomingNote.id ? incomingNote : n));
+          }
+          return [...prev, incomingNote];
+        });
+        void dbPut('notes', incomingNote);
+      },
+      onNoteDelete: (deletedNoteId) => {
+        setNotes((prev) => prev.filter((n) => n.id !== deletedNoteId));
+        void dbDelete('notes', deletedNoteId);
+      },
+      onPresenceChange: (peers) => {
+        setCollaboratorsPresence(peers);
+      },
+    });
+
+    collabHandleRef.current = handle;
+
+    return () => {
+      handle.unsubscribe();
+      if (collabHandleRef.current === handle) {
+        collabHandleRef.current = null;
+      }
+    };
+  }, [user?.id, user?.username, user?.fullName, activeDocId]);
 
   return (
     <TimerProvider
@@ -1396,6 +1743,8 @@ export const App: React.FC = () => {
         setCurrentModule={setCurrentModule}
         folders={folders}
         documents={documents}
+        sharedDocuments={sharedDocuments}
+        collaboratorsPresence={collaboratorsPresence}
         notes={notes}
         tasks={tasks}
         studySettings={studySettings}
@@ -1409,6 +1758,22 @@ export const App: React.FC = () => {
         user={user}
         syncStatus={syncStatus}
         onOpenAccountModal={() => setAccountModalOpen(true)}
+        onOpenFriendsModal={() => setFriendsModalOpen(true)}
+        onShareDocument={(doc) => setShareDocTarget(doc)}
+        notificationsSlot={
+          <NotificationsBell
+            currentUserId={user?.id || null}
+            friendships={friendships}
+            incomingShares={incomingShares}
+            folders={folders}
+            onAcceptFriend={handleAcceptFriend}
+            onRejectFriend={handleRejectOrRemoveFriend}
+            onAcceptCopyShare={handleAcceptCopyShare}
+            onAcceptCollaborativeShare={handleAcceptCollaborativeShare}
+            onDismissShare={handleDismissOrLeaveShare}
+            onOpenFriendsModal={() => setFriendsModalOpen(true)}
+          />
+        }
         onOpenAppearanceModal={() => setAppearanceModalOpen(true)}
         onToggleAudio={handleToggleAudio}
         onCreateFolder={handleCreateFolder}
@@ -1463,12 +1828,48 @@ export const App: React.FC = () => {
         onClose={() => setAccountModalOpen(false)}
         onSignIn={handleSignIn}
         onSignUp={handleSignUp}
+        onUpdateUsername={handleUpdateUsername}
         onSignOut={handleSignOut}
         onSyncNow={() =>
           user ? hydrateFromCloud(user) : Promise.resolve()
         }
         onExportBackup={handleExportBackup}
         onImportBackup={handleImportBackup}
+      />
+
+      <UsernameOnboardingModal
+        open={Boolean(
+          user && profileLoadedFromCloud && !user.username && !usernamePromptDismissed
+        )}
+        fullName={user?.fullName || ''}
+        onSaveUsername={handleUpdateUsername}
+        onDismiss={() => setUsernamePromptDismissed(true)}
+      />
+
+      <FriendsAndSharesModal
+        open={friendsModalOpen}
+        user={user}
+        friendships={friendships}
+        incomingShares={incomingShares}
+        folders={folders}
+        onClose={() => setFriendsModalOpen(false)}
+        onSendFriendRequest={handleSendFriendRequest}
+        onAcceptFriend={handleAcceptFriend}
+        onRejectOrRemoveFriend={handleRejectOrRemoveFriend}
+        onAcceptCopyShare={handleAcceptCopyShare}
+        onAcceptCollaborativeShare={handleAcceptCollaborativeShare}
+        onOpenSharedDocument={(docId) => void handleOpenDocument(docId)}
+        onDismissOrLeaveShare={handleDismissOrLeaveShare}
+      />
+
+      <ShareDocumentModal
+        open={Boolean(shareDocTarget)}
+        doc={shareDocTarget}
+        user={user}
+        friendships={friendships}
+        onClose={() => setShareDocTarget(null)}
+        onOpenFriendsModal={() => setFriendsModalOpen(true)}
+        onNotify={notify}
       />
 
       <DiagnosticModal

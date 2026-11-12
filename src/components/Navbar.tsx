@@ -10,6 +10,7 @@ import {
   Palette,
   Pause,
   Play,
+  Users,
   Volume2,
   VolumeX,
 } from 'lucide-react';
@@ -26,8 +27,10 @@ interface NavbarProps {
   user: UserProfile | null;
   syncStatus: 'local' | 'synced' | 'syncing' | 'error';
   onOpenAccountModal: () => void;
+  onOpenFriendsModal: () => void;
   onOpenAppearanceModal: () => void;
   onOpenTutorial: () => void;
+  notificationsSlot?: React.ReactNode;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -38,8 +41,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   user,
   syncStatus,
   onOpenAccountModal,
+  onOpenFriendsModal,
   onOpenAppearanceModal,
   onOpenTutorial,
+  notificationsSlot,
 }) => {
   const { mode, remainingSeconds, elapsedSeconds, isRunning, toggleTimer } = useTimer();
 
@@ -76,7 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   ];
 
   return (
-    <header className="h-12 xl:h-14 sf-header-chrome backdrop-blur flex items-center justify-between px-2 sm:px-3 xl:px-4 gap-1.5 sm:gap-2 z-40 select-none flex-shrink-0 overflow-hidden">
+    <header className="h-12 xl:h-14 sf-header-chrome backdrop-blur flex items-center justify-between px-2 sm:px-3 xl:px-4 gap-1.5 sm:gap-2 z-40 select-none flex-shrink-0">
       <div className="flex items-center gap-2 flex-shrink-0">
         <div className="w-8 h-8 xl:w-9 xl:h-9 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 flex-shrink-0">
           <BookOpen className="w-4 h-4 xl:w-5 xl:h-5 text-white" />
@@ -161,6 +166,22 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span className="w-2 h-2 rounded-full bg-indigo-500 flex-shrink-0" />
         </button>
 
+        {user && (
+          <>
+            {notificationsSlot}
+            <button
+              type="button"
+              onClick={onOpenFriendsModal}
+              title="Amigos y Documentos Compartidos"
+              aria-label="Amigos y Documentos Compartidos"
+              className="flex items-center gap-1 p-1.5 xl:px-2 xl:py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition-colors"
+            >
+              <Users className="w-4 h-4 text-indigo-400" />
+              <span className="hidden xl:inline text-xs font-medium">Amigos</span>
+            </button>
+          </>
+        )}
+
         <button
           type="button"
           id="nav-account-button"
@@ -168,7 +189,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={onOpenAccountModal}
           title={
             user
-              ? `${user.fullName || user.email} · Cuenta y sincronización`
+              ? `${user.username ? `@${user.username} · ` : ''}${user.fullName || user.email} · Cuenta y sincronización`
               : 'Cuenta, sincronización y respaldo'
           }
           className="flex items-center gap-1.5 p-1.5 sm:px-2 xl:px-2.5 xl:py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition-colors"
@@ -185,7 +206,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }`}
               />
               <span className="hidden xl:inline max-w-[115px] truncate text-[11px]">
-                {user.fullName || user.email}
+                {user.username ? `@${user.username}` : user.fullName || user.email}
               </span>
             </>
           ) : (
