@@ -718,20 +718,23 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
               className="flex items-end cursor-pointer select-none"
             >
               <div
-                className={`h-2.5 w-16 rounded-t-lg border-t border-l border-r -mb-[1px] relative z-10 flex items-center px-2 transition-all ${dragOverFolderId === 'unassigned'
+                className={`h-2.5 w-16 rounded-t-lg border-t border-l border-r -mb-[1px] relative z-10 flex items-center px-2 transition-all ${
+                  dragOverFolderId === 'unassigned'
                     ? 'border-indigo-400 bg-indigo-500/20'
                     : 'border-indigo-500/35 bg-indigo-500/10'
-                  }`}
+                }`}
                 style={{ backgroundColor: 'rgb(var(--sf-bg-panel))' }}
               >
                 <div className="h-1 w-full rounded-full bg-indigo-400/70" />
               </div>
             </div>
             <div
-                    ? 'border-indigo-400 bg-indigo-500/15'
-                    : 'border-indigo-500/30 bg-indigo-500/[0.05]'
-                  }`}
-                    >
+              className={`rounded-xl !rounded-tl-none border transition-all overflow-hidden relative z-0 ${
+                dragOverFolderId === 'unassigned'
+                  ? 'border-indigo-400 bg-indigo-500/15'
+                  : 'border-indigo-500/30 bg-indigo-500/[0.05]'
+              }`}
+            >
                       <div
                         onClick={() => toggleFolderExpanded('unassigned')}
                         className="p-2.5 flex items-center justify-between gap-2 cursor-pointer select-none hover:bg-white/[0.02]"
