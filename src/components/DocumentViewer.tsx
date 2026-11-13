@@ -5,6 +5,7 @@ import {
   ArrowRight,
   ArrowRightFromLine,
   BookOpen,
+  Brain,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -13,6 +14,8 @@ import {
   Clock,
   Coffee,
   Columns2,
+  Eye,
+  EyeOff,
   FastForward,
   Gauge,
   Globe,
@@ -30,6 +33,7 @@ import {
   Plus,
   Route,
   Share2,
+  SquareDashedBottom,
   StickyNote,
   Trash2,
   Users,
@@ -38,13 +42,16 @@ import {
 import {
   CollaboratorPresence,
   DiagnosticData,
+  DocumentOcclusionRecord,
   DocumentRecord,
   DocumentType,
+  FsrsRating,
   KanbanZone,
   LayoutStyleId,
   NoteColor,
   RouteSegment,
   RouteStep,
+  Sq3rDocumentState,
   StickyNoteRecord,
   StudyPlanResult,
   StudySettings,
@@ -53,9 +60,13 @@ import { formatDurationCompact } from '../lib/diagnosticEngine';
 import {
   computeStageHorizontalMargins,
   computeTouchNavigationAction,
+  extractPptxSlidePlainText,
 } from '../lib/documentUtils';
 import { canDeleteNote, canEditNote } from '../lib/collaboration';
 import { formatErrorMessageEs } from '../lib/errorMessages';
+import { scheduleFsrsReview } from '../lib/fsrs';
+import { resolveActiveStrategyId } from '../lib/studyMethods';
+import { Sq3rFlowBar } from './Sq3rFlowBar';
 import type { DocxPage } from '../lib/docxParser';
 import type { ParsedPptxPresentation } from '../lib/pptxParser';
 import { useTimer } from '../context/TimerContext';
@@ -65,9 +76,11 @@ interface DocumentViewerProps {
   documentBuffer: ArrayBuffer | null;
   isLoadingBuffer: boolean;
   notes: StickyNoteRecord[];
+  occlusions?: DocumentOcclusionRecord[];
   studySettings: StudySettings;
   planResult: StudyPlanResult;
   diagnosticData: DiagnosticData;
+  sq3rState?: Sq3rDocumentState | null;
   highlightedNoteId?: string | null;
   onChangePage: (docId: string, page: number) => void;
   onOpenDocumentAtPage: (docId: string, page: number) => void;
@@ -84,6 +97,21 @@ interface DocumentViewerProps {
   onCreateNote: (note: Omit<StickyNoteRecord, 'id' | 'createdAt'>) => Promise<void>;
   onUpdateNote: (noteId: string, patch: Partial<StickyNoteRecord>) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
+  onCreateOcclusion?: (
+    occ: Omit<DocumentOcclusionRecord, 'id' | 'createdAt'>
+  ) => Promise<void>;
+  onUpdateOcclusion?: (
+    id: string,
+    patch: Partial<DocumentOcclusionRecord>
+  ) => Promise<void>;
+  onDeleteOcclusion?: (id: string) => Promise<void>;
+  onUpdateSq3rState?: (next: Sq3rDocumentState) => void;
+  onOpenBoardForDoc?: (docId: string) => void;
+  onOpenFeynman?: (
+    note: StickyNoteRecord,
+    sourceImage: string | null,
+    sourceText: string | null
+  ) => void;
   onNotify: (msg: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
@@ -110,9 +138,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   documentBuffer,
   isLoadingBuffer,
   notes,
+  occlusions = [],
   studySettings,
   planResult,
   diagnosticData,
+  sq3rState = null,
   highlightedNoteId = null,
   onChangePage,
   onOpenDocumentAtPage,
@@ -123,6 +153,12 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   onCreateNote,
   onUpdateNote,
   onDeleteNote,
+  onCreateOcclusion,
+  onUpdateOcclusion,
+  onDeleteOcclusion,
+  onUpdateSq3rState,
+  onOpenBoardForDoc,
+  onOpenFeynman,
   onNotify,
   sidebarOpen = true,
   onToggleSidebar,
@@ -134,6 +170,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 }) => {
   const {
     mode,
+    isStopwatchActive,
     remainingSeconds,
     elapsedSeconds,
     totalDurationSeconds,
@@ -177,6 +214,17 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [zoom, setZoom] = useState<number>(1.0);
   const [viewMode, setViewMode] = useState<'single' | 'double'>('single');
   const [stickyMode, setStickyMode] = useState<boolean>(false);
+  const [occlusionDrawMode, setOcclusionDrawMode] = useState<boolean>(false);
+  const [activeRecallMode, setActiveRecallMode] = useState<boolean>(false);
+  const [revealedNoteIds, setRevealedNoteIds] = useState<Record<string, boolean>>({});
+  const [revealedOccIds, setRevealedOccIds] = useState<Record<string, boolean>>({});
+  const [drawingRect, setDrawingRect] = useState<{
+    page: number;
+    startX: number;
+    startY: number;
+    curX: number;
+    curY: number;
+  } | null>(null);
   const [selectedColor, setSelectedColor] = useState<NoteColor>('yellow');
   const [showSpeakerNotes, setShowSpeakerNotes] = useState<boolean>(true);
   const [showNotesRail, setShowNotesRail] = useState<boolean>(false);
@@ -186,6 +234,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [dockCollapsed, setDockCollapsed] = useState<boolean>(false);
   const [routeIslandCompact, setRouteIslandCompact] = useState<boolean>(false);
   const [newNoteShared, setNewNoteShared] = useState<boolean>(true);
+  const activeStrategyId = resolveActiveStrategyId(studySettings);
   const isViewerOnly = activeDoc?.sharedRole === 'viewer';
   const isCollaborativeDoc = Boolean(
     activeDoc &&
@@ -197,6 +246,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   useEffect(() => {
     setNewNoteShared(true);
+    setRevealedNoteIds({});
+    setRevealedOccIds({});
   }, [activeDoc?.id]);
   const [pageTurnFeedback, setPageTurnFeedback] = useState<{
     direction: 'prev' | 'next';
@@ -908,6 +959,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       content: '',
       color: selectedColor,
       zone: 'ideas',
+      format: studySettings.defaultNoteFormat || 'standard',
       userId: currentUserId || undefined,
       authorUsername: currentUsername || null,
       isShared: isCollaborativeDoc ? newNoteShared : false,
@@ -1297,6 +1349,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       content: '',
       color: selectedColor,
       zone: 'ideas',
+      format: studySettings.defaultNoteFormat || 'standard',
       userId: currentUserId || undefined,
       authorUsername: currentUsername || null,
       isShared: isCollaborativeDoc ? newNoteShared : false,
@@ -1306,8 +1359,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     onNotify('Nota adhesiva fijada. Escribe tu apunte en ella.', 'success');
   };
 
-  const isPageStopwatch = mode === 'study' && studySettings.intervalMode === 'pages';
-  const timerSec = isPageStopwatch ? elapsedSeconds : remainingSeconds;
+  const timerSec = isStopwatchActive ? elapsedSeconds : remainingSeconds;
   const formattedClock = `${String(Math.floor(timerSec / 60)).padStart(2, '0')}:${String(
     timerSec % 60
   ).padStart(2, '0')}`;
@@ -1320,6 +1372,211 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const secondarySlide = hasSecondaryPage
     ? pptxData?.slides[Math.min(currentPage, Math.max(0, pptxData.slides.length - 1))]
     : undefined;
+
+  const handleOpenFeynmanFromViewer = (note: StickyNoteRecord) => {
+    if (!onOpenFeynman) return;
+    let sourceImg: string | null = null;
+    let sourceTxt: string | null = null;
+    const notePage = note.page || currentPage;
+
+    if (activeDoc?.fileType === 'pdf') {
+      const targetCanvas =
+        hasSecondaryPage && notePage === currentPage + 1
+          ? pdfCanvasSecondaryRef.current
+          : pdfCanvasRef.current;
+      try {
+        if (targetCanvas && targetCanvas.width > 0) {
+          sourceImg = targetCanvas.toDataURL('image/png');
+        }
+      } catch {
+        sourceImg = null;
+      }
+    } else if (activeDoc?.fileType === 'docx') {
+      const dPage = docxPages[Math.max(0, notePage - 1)];
+      if (dPage) {
+        sourceTxt = dPage.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+    } else if (activeDoc?.fileType === 'pptx') {
+      const pSlide = pptxData?.slides[Math.max(0, notePage - 1)];
+      if (pSlide) {
+        sourceTxt = extractPptxSlidePlainText(pSlide);
+      }
+    }
+
+    onOpenFeynman(note, sourceImg, sourceTxt);
+  };
+
+  const handleSheetOcclusionPointerDown = (
+    e: React.PointerEvent<HTMLDivElement>,
+    pageNumber: number
+  ) => {
+    if (!occlusionDrawMode || !activeDoc || isViewerOnly) return;
+    if ((e.target as HTMLElement).closest('.occlusion-box-element')) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const rx = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+    const ry = Math.max(0, Math.min(1, (e.clientY - rect.top) / Math.max(1, rect.height)));
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDrawingRect({
+      page: pageNumber,
+      startX: rx,
+      startY: ry,
+      curX: rx,
+      curY: ry,
+    });
+  };
+
+  const handleSheetOcclusionPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!drawingRect) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const rx = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+    const ry = Math.max(0, Math.min(1, (e.clientY - rect.top) / Math.max(1, rect.height)));
+    setDrawingRect((prev) => (prev ? { ...prev, curX: rx, curY: ry } : null));
+  };
+
+  const handleSheetOcclusionPointerUp = async () => {
+    if (!drawingRect || !activeDoc || !onCreateOcclusion) {
+      setDrawingRect(null);
+      return;
+    }
+    const xRatio = Math.min(drawingRect.startX, drawingRect.curX);
+    const yRatio = Math.min(drawingRect.startY, drawingRect.curY);
+    const widthRatio = Math.abs(drawingRect.curX - drawingRect.startX);
+    const heightRatio = Math.abs(drawingRect.curY - drawingRect.startY);
+    const pageNum = drawingRect.page;
+    setDrawingRect(null);
+
+    if (widthRatio < 0.03 || heightRatio < 0.02) {
+      return;
+    }
+
+    await onCreateOcclusion({
+      docId: activeDoc.id,
+      page: pageNum,
+      xRatio: Number(xRatio.toFixed(4)),
+      yRatio: Number(yRatio.toFixed(4)),
+      widthRatio: Number(widthRatio.toFixed(4)),
+      heightRatio: Number(heightRatio.toFixed(4)),
+      label: `Bloque oculto (Pág. ${pageNum})`,
+    });
+    setOcclusionDrawMode(false);
+    setActiveRecallMode(true);
+    onNotify('Caja de oclusión creada. Haz clic sobre ella para revelar y evaluar.', 'success');
+  };
+
+  const renderOcclusionLayer = (pageNumber: number) => {
+    if (!activeDoc) return null;
+    const pageOccs = occlusions.filter(
+      (o) => o.docId === activeDoc.id && o.page === pageNumber
+    );
+    const showDraft = drawingRect && drawingRect.page === pageNumber;
+    if (pageOccs.length === 0 && !showDraft && !occlusionDrawMode) return null;
+
+    return (
+      <div
+        onPointerDown={(e) => handleSheetOcclusionPointerDown(e, pageNumber)}
+        onPointerMove={handleSheetOcclusionPointerMove}
+        onPointerUp={() => void handleSheetOcclusionPointerUp()}
+        className={`absolute inset-0 z-20 ${
+          occlusionDrawMode
+            ? 'pointer-events-auto cursor-crosshair touch-none bg-indigo-500/[0.04]'
+            : 'pointer-events-none'
+        }`}
+      >
+        {showDraft && drawingRect && (
+          <div
+            style={{
+              left: `${Math.min(drawingRect.startX, drawingRect.curX) * 100}%`,
+              top: `${Math.min(drawingRect.startY, drawingRect.curY) * 100}%`,
+              width: `${Math.abs(drawingRect.curX - drawingRect.startX) * 100}%`,
+              height: `${Math.abs(drawingRect.curY - drawingRect.startY) * 100}%`,
+            }}
+            className="absolute border-2 border-dashed border-amber-400 bg-amber-500/25 rounded-md pointer-events-none"
+          />
+        )}
+
+        {pageOccs.map((occ) => {
+          const isRevealed = Boolean(revealedOccIds[occ.id]) || !activeRecallMode;
+          return (
+            <div
+              key={occ.id}
+              style={{
+                left: `${occ.xRatio * 100}%`,
+                top: `${occ.yRatio * 100}%`,
+                width: `${occ.widthRatio * 100}%`,
+                height: `${occ.heightRatio * 100}%`,
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!activeRecallMode) return;
+                setRevealedOccIds((prev) => ({
+                  ...prev,
+                  [occ.id]: !prev[occ.id],
+                }));
+              }}
+              className={`occlusion-box-element pointer-events-auto absolute rounded-md border transition-all flex flex-col justify-between ${
+                isRevealed
+                  ? 'border-dashed border-amber-400/70 bg-amber-500/10'
+                  : 'border-amber-400 bg-slate-900/95 shadow-lg cursor-pointer hover:bg-slate-800'
+              }`}
+            >
+              {!isRevealed ? (
+                <div className="m-auto px-2 py-1 text-center select-none">
+                  <EyeOff className="w-3.5 h-3.5 text-amber-300 mx-auto mb-0.5" />
+                  <span className="text-[10px] font-semibold text-amber-200 block leading-tight">
+                    Oculto · Clic para revelar
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-start justify-between p-1 gap-1">
+                  {activeRecallMode && onUpdateOcclusion && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex items-center gap-0.5 bg-slate-950/90 rounded px-1 py-0.5 border border-slate-700"
+                    >
+                      {(
+                        [
+                          { id: 'again', txt: 'Otra', cls: 'text-rose-300 hover:bg-rose-500/25' },
+                          { id: 'hard', txt: 'Difícil', cls: 'text-amber-300 hover:bg-amber-500/25' },
+                          { id: 'good', txt: 'Bien', cls: 'text-emerald-300 hover:bg-emerald-500/25' },
+                          { id: 'easy', txt: 'Fácil', cls: 'text-sky-300 hover:bg-sky-500/25' },
+                        ] as const
+                      ).map((btn) => (
+                        <button
+                          key={btn.id}
+                          type="button"
+                          onClick={() => {
+                            const nextFsrs = scheduleFsrsReview(occ.fsrs, btn.id);
+                            void onUpdateOcclusion(occ.id, { fsrs: nextFsrs });
+                            setRevealedOccIds((prev) => ({ ...prev, [occ.id]: false }));
+                          }}
+                          className={`text-[9px] font-bold px-1 rounded ${btn.cls}`}
+                        >
+                          {btn.txt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {onDeleteOcclusion && !isViewerOnly && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onDeleteOcclusion(occ.id);
+                      }}
+                      title="Eliminar caja de oclusión"
+                      className="ml-auto p-0.5 rounded bg-slate-950/80 text-slate-300 hover:text-rose-400"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   const renderPptxSlideContent = (
     slide: NonNullable<typeof currentSlide>
@@ -1446,6 +1703,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     const isInsideSheet = x > -0.04 && x < 0.96;
     const editable = canEditNote(note, currentUserId);
     const deletable = canDeleteNote(note, activeDoc, currentUserId);
+    const isCornell = note.format === 'cornell';
+    const isOccludedForRecall = activeRecallMode && !revealedNoteIds[note.id];
+
+    const handleRateNoteFsrs = (rating: FsrsRating) => {
+      const nextFsrs = scheduleFsrsReview(note.fsrs, rating);
+      void onUpdateNote(note.id, { fsrs: nextFsrs });
+      setRevealedNoteIds((prev) => ({ ...prev, [note.id]: false }));
+    };
 
     return (
       <div
@@ -1457,7 +1722,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         style={{
           left: `${x * 100}%`,
           top: `${y * 100}%`,
-          width: `${NOTE_WIDTH}px`,
+          width: `${isCornell ? Math.max(NOTE_WIDTH, 240) : NOTE_WIDTH}px`,
           zIndex: isDragging ? 50 : isHighlighted ? 40 : 30,
         }}
         className={`sticky-note-element pointer-events-auto absolute p-2 rounded-xl border flex flex-col note-${note.color} ${
@@ -1485,6 +1750,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             <span className="flex-shrink-0">
               {activeDoc?.fileType === 'pptx' ? 'Slide' : 'Pág.'} {note.page}
             </span>
+            {isCornell && (
+              <span className="px-1 rounded bg-black/15 text-[8px] font-bold uppercase">
+                Cornell
+              </span>
+            )}
             {note.isShared && note.authorUsername && (
               <span className="truncate px-1 py-0.2 rounded bg-black/10 text-[9px] font-mono">
                 @{note.authorUsername}
@@ -1492,6 +1762,40 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             )}
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
+            {editable && (
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onUpdateNote(note.id, {
+                    format: isCornell ? 'standard' : 'cornell',
+                  });
+                }}
+                title={isCornell ? 'Cambiar a Post-it simple' : 'Convertir a formato Cornell (3 campos)'}
+                className={`p-0.5 rounded hover:bg-black/15 ${
+                  isCornell ? 'opacity-100 bg-black/15' : 'opacity-70 hover:opacity-100'
+                }`}
+              >
+                <Columns2 className="w-3 h-3" />
+              </button>
+            )}
+            {onOpenFeynman && (
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenFeynmanFromViewer(note);
+                }}
+                title="Marcar complejo y simplificar con Técnica Feynman"
+                className={`p-0.5 rounded hover:bg-black/15 ${
+                  note.isComplex ? 'bg-purple-700 text-white opacity-100' : 'opacity-70 hover:opacity-100'
+                }`}
+              >
+                <Brain className="w-3 h-3" />
+              </button>
+            )}
             {editable && (isCollaborativeDoc || note.isShared) && (
               <button
                 type="button"
@@ -1548,36 +1852,129 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             )}
           </div>
         </div>
-        <textarea
-          value={draftTexts[note.id] ?? note.content}
-          readOnly={!editable}
-          onChange={(e) => {
-            if (!editable) return;
-            const val = e.target.value;
-            setDraftTexts((prev) => ({ ...prev, [note.id]: val }));
-            const existingTimer = saveTimersRef.current.get(note.id);
-            if (existingTimer) window.clearTimeout(existingTimer);
-            const timerId = window.setTimeout(() => {
-              saveTimersRef.current.delete(note.id);
-              void onUpdateNote(note.id, { content: val });
-            }, 450);
-            saveTimersRef.current.set(note.id, timerId);
-          }}
-          onBlur={(e) => {
-            if (!editable) return;
-            const existingTimer = saveTimersRef.current.get(note.id);
-            if (existingTimer) {
-              window.clearTimeout(existingTimer);
-              saveTimersRef.current.delete(note.id);
-            }
-            if (e.target.value !== note.content) {
-              void onUpdateNote(note.id, { content: e.target.value });
-            }
-          }}
-          rows={3}
-          placeholder={editable ? 'Escribe un apunte...' : ''}
-          className="w-full bg-transparent resize-none border-0 p-0 text-xs focus:outline-none placeholder-black/40 leading-snug"
-        />
+
+        {isOccludedForRecall ? (
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setRevealedNoteIds((prev) => ({ ...prev, [note.id]: true }));
+            }}
+            className="my-1 py-5 px-2 rounded-lg bg-slate-950/85 text-white text-[11px] font-semibold flex flex-col items-center justify-center gap-1 hover:bg-slate-900 transition-colors"
+          >
+            <Eye className="w-4 h-4 text-amber-300" />
+            <span>
+              {note.cornellCues?.trim()
+                ? note.cornellCues
+                : 'Contenido oculto · Clic para revelar'}
+            </span>
+          </button>
+        ) : isCornell ? (
+          <div className="space-y-1 text-[11px]">
+            <input
+              type="text"
+              value={note.cornellCues || ''}
+              readOnly={!editable}
+              onPointerDown={(e) => e.stopPropagation()}
+              onChange={(e) =>
+                void onUpdateNote(note.id, { cornellCues: e.target.value })
+              }
+              placeholder="1. Claves / Preguntas..."
+              className="w-full bg-black/10 rounded px-1.5 py-0.5 text-[11px] font-semibold focus:outline-none placeholder-black/45"
+            />
+            <textarea
+              value={draftTexts[note.id] ?? note.content}
+              readOnly={!editable}
+              onChange={(e) => {
+                if (!editable) return;
+                const val = e.target.value;
+                setDraftTexts((prev) => ({ ...prev, [note.id]: val }));
+                const existingTimer = saveTimersRef.current.get(note.id);
+                if (existingTimer) window.clearTimeout(existingTimer);
+                const timerId = window.setTimeout(() => {
+                  saveTimersRef.current.delete(note.id);
+                  void onUpdateNote(note.id, { content: val });
+                }, 450);
+                saveTimersRef.current.set(note.id, timerId);
+              }}
+              rows={3}
+              placeholder="2. Notas de desarrollo..."
+              className="w-full bg-transparent resize-none border-0 p-0 text-xs focus:outline-none placeholder-black/40 leading-snug"
+            />
+            <input
+              type="text"
+              value={note.cornellSummary || ''}
+              readOnly={!editable}
+              onPointerDown={(e) => e.stopPropagation()}
+              onChange={(e) =>
+                void onUpdateNote(note.id, { cornellSummary: e.target.value })
+              }
+              placeholder="3. Resumen en 2 líneas..."
+              className="w-full bg-black/10 rounded px-1.5 py-0.5 text-[10px] italic focus:outline-none placeholder-black/45"
+            />
+          </div>
+        ) : (
+          <textarea
+            value={draftTexts[note.id] ?? note.content}
+            readOnly={!editable}
+            onChange={(e) => {
+              if (!editable) return;
+              const val = e.target.value;
+              setDraftTexts((prev) => ({ ...prev, [note.id]: val }));
+              const existingTimer = saveTimersRef.current.get(note.id);
+              if (existingTimer) window.clearTimeout(existingTimer);
+              const timerId = window.setTimeout(() => {
+                saveTimersRef.current.delete(note.id);
+                void onUpdateNote(note.id, { content: val });
+              }, 450);
+              saveTimersRef.current.set(note.id, timerId);
+            }}
+            onBlur={(e) => {
+              if (!editable) return;
+              const existingTimer = saveTimersRef.current.get(note.id);
+              if (existingTimer) {
+                window.clearTimeout(existingTimer);
+                saveTimersRef.current.delete(note.id);
+              }
+              if (e.target.value !== note.content) {
+                void onUpdateNote(note.id, { content: e.target.value });
+              }
+            }}
+            rows={3}
+            placeholder={editable ? 'Escribe un apunte...' : ''}
+            className="w-full bg-transparent resize-none border-0 p-0 text-xs focus:outline-none placeholder-black/40 leading-snug"
+          />
+        )}
+
+        {activeRecallMode && revealedNoteIds[note.id] && (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            className="mt-1 grid grid-cols-4 gap-0.5 bg-slate-950/90 p-1 rounded-lg text-[9px] font-bold"
+          >
+            {(
+              [
+                { id: 'again', label: 'Otra', cls: 'text-rose-300 hover:bg-rose-500/25' },
+                { id: 'hard', label: 'Difícil', cls: 'text-amber-300 hover:bg-amber-500/25' },
+                { id: 'good', label: 'Bien', cls: 'text-emerald-300 hover:bg-emerald-500/25' },
+                { id: 'easy', label: 'Fácil', cls: 'text-sky-300 hover:bg-sky-500/25' },
+              ] as const
+            ).map((btn) => (
+              <button
+                key={btn.id}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRateNoteFsrs(btn.id);
+                }}
+                className={`py-0.5 rounded ${btn.cls}`}
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="mt-1 pt-1 border-t border-black/10 flex items-center justify-between text-[9px]">
           <select
             value={note.zone}
@@ -1845,6 +2242,38 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               <span className="hidden xl:inline">
                 {stickyMode ? 'Fijar Activo' : 'Pegar Nota'}
               </span>
+            </button>
+
+            <button
+              type="button"
+              disabled={isViewerOnly}
+              onClick={() => {
+                setStickyMode(false);
+                setOcclusionDrawMode((v) => !v);
+              }}
+              title="Dibujar caja de oclusión sobre una fórmula o esquema"
+              className={`px-2 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors disabled:opacity-40 ${
+                occlusionDrawMode
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'border border-slate-700 bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              <SquareDashedBottom className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">Ocluir</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveRecallMode((v) => !v)}
+              title="Modo Active Recall: ocultar textos de notas y oclusiones para evocar antes de revelar"
+              className={`px-2 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                activeRecallMode
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'border border-slate-700 bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              <EyeOff className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">Repaso</span>
             </button>
 
             {activeDoc && onShareDocument && (!activeDoc.sharedRole || activeDoc.sharedRole === 'owner') && (
@@ -2158,6 +2587,35 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         </div>
       )}
 
+      {/* Flujo Guiado SQ3R cuando la estrategia SQ3R está activa */}
+      {!isFullscreen &&
+        activeDoc &&
+        activeStrategyId === 'sq3r' &&
+        onUpdateSq3rState &&
+        onOpenBoardForDoc && (
+          <Sq3rFlowBar
+            doc={activeDoc}
+            state={
+              sq3rState || {
+                docId: activeDoc.id,
+                stage: 'survey',
+                surveyMinutesTarget: 4,
+                questions: [],
+                reciteText: '',
+                updatedAt: new Date().toISOString(),
+              }
+            }
+            pdfDocument={pdfProxy}
+            docxPages={docxPages}
+            pptxData={pptxData}
+            onUpdateState={onUpdateSq3rState}
+            onCreateNote={onCreateNote}
+            onJumpToPage={(pg) => onChangePage(activeDoc.id, pg)}
+            onOpenBoardForDoc={onOpenBoardForDoc}
+            onNotify={onNotify}
+          />
+        )}
+
       {/* Area de Lectura + Controles flotantes inferiores + Panel lateral de Notas */}
       <div className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 relative flex flex-col overflow-hidden">
@@ -2324,6 +2782,9 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     </div>
                   )}
 
+                  {/* Capa de Oclusiones Visuales página actual */}
+                  {renderOcclusionLayer(currentPage)}
+
                   {/* Capa Interactiva de Post-its página actual */}
                   <div
                     ref={overlayRef}
@@ -2390,6 +2851,9 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                         {renderPptxSlideContent(secondarySlide)}
                       </div>
                     )}
+
+                    {/* Capa de Oclusiones Visuales página derecha */}
+                    {renderOcclusionLayer(currentPage + 1)}
 
                     {/* Capa Interactiva de Post-its página derecha */}
                     <div className="absolute inset-0 select-none overflow-visible pointer-events-none">
@@ -2873,6 +3337,38 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                       <span>{stickyMode ? 'Fijar Activo' : 'Pegar'}</span>
                     </button>
 
+                    <button
+                      type="button"
+                      disabled={isViewerOnly}
+                      onClick={() => {
+                        setStickyMode(false);
+                        setOcclusionDrawMode((v) => !v);
+                      }}
+                      title="Dibujar oclusión rectangular sobre fórmula o esquema"
+                      className={`px-2 py-1 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors disabled:opacity-40 ${
+                        occlusionDrawMode
+                          ? 'bg-amber-600 text-white shadow-sm'
+                          : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200'
+                      }`}
+                    >
+                      <SquareDashedBottom className="w-3.5 h-3.5" />
+                      <span className="hidden md:inline">Ocluir</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveRecallMode((v) => !v)}
+                      title="Modo Repaso Active Recall: ocultar notas y oclusiones para evocar"
+                      className={`px-2 py-1 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors ${
+                        activeRecallMode
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200'
+                      }`}
+                    >
+                      <EyeOff className="w-3.5 h-3.5" />
+                      <span className="hidden md:inline">Repaso</span>
+                    </button>
+
                     {onShareDocument && (!activeDoc.sharedRole || activeDoc.sharedRole === 'owner') && (
                       <button
                         type="button"
@@ -3086,6 +3582,34 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                           )}
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
+                          {editable && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void onUpdateNote(note.id, {
+                                  format: note.format === 'cornell' ? 'standard' : 'cornell',
+                                })
+                              }
+                              className={`p-0.5 rounded hover:bg-black/15 ${
+                                note.format === 'cornell' ? 'bg-black/15' : ''
+                              }`}
+                              title="Alternar formato Cornell (3 campos)"
+                            >
+                              <Columns2 className="w-3 h-3" />
+                            </button>
+                          )}
+                          {onOpenFeynman && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenFeynmanFromViewer(note)}
+                              className={`p-0.5 rounded hover:bg-black/15 ${
+                                note.isComplex ? 'bg-purple-700 text-white' : ''
+                              }`}
+                              title="Marcar complejo y explicar con Técnica Feynman"
+                            >
+                              <Brain className="w-3 h-3" />
+                            </button>
+                          )}
                           {editable && (isCollaborativeDoc || note.isShared) && (
                             <button
                               type="button"
@@ -3133,6 +3657,19 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                         </div>
                       </div>
 
+                      {note.format === 'cornell' && (
+                        <input
+                          type="text"
+                          value={note.cornellCues || ''}
+                          readOnly={!editable}
+                          onChange={(e) =>
+                            void onUpdateNote(note.id, { cornellCues: e.target.value })
+                          }
+                          placeholder="1. Claves / Preguntas..."
+                          className="w-full bg-black/10 rounded px-1.5 py-0.5 text-[11px] font-semibold focus:outline-none placeholder-black/45"
+                        />
+                      )}
+
                       <textarea
                         value={draftTexts[note.id] ?? note.content}
                         readOnly={!editable}
@@ -3160,9 +3697,28 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                           }
                         }}
                         rows={3}
-                        placeholder={editable ? 'Escribe un apunte...' : ''}
+                        placeholder={
+                          editable
+                            ? note.format === 'cornell'
+                              ? '2. Notas de desarrollo...'
+                              : 'Escribe un apunte...'
+                            : ''
+                        }
                         className="w-full bg-transparent resize-none border-0 p-0 text-xs focus:outline-none placeholder-black/40 leading-snug"
                       />
+
+                      {note.format === 'cornell' && (
+                        <input
+                          type="text"
+                          value={note.cornellSummary || ''}
+                          readOnly={!editable}
+                          onChange={(e) =>
+                            void onUpdateNote(note.id, { cornellSummary: e.target.value })
+                          }
+                          placeholder="3. Resumen en 2 líneas..."
+                          className="w-full bg-black/10 rounded px-1.5 py-0.5 text-[10px] italic focus:outline-none placeholder-black/45"
+                        />
+                      )}
 
                       <div className="flex items-center justify-between pt-1 border-t border-black/10 text-[9px]">
                         <select

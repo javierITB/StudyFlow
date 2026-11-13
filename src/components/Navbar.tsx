@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import {
+  Activity,
   BookOpen,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -13,12 +15,23 @@ import {
   PanelLeftOpen,
   Pause,
   Play,
+  Square,
   Users,
   Volume2,
   VolumeX,
 } from 'lucide-react';
 import { useTimer } from '../context/TimerContext';
-import { LayoutStyleId, StudySettings, UserProfile } from '../types/studyflow';
+import {
+  LayoutStyleId,
+  StudySettings,
+  StudyStrategyId,
+  UserProfile,
+} from '../types/studyflow';
+import {
+  STUDY_STRATEGY_CATALOG,
+  computeFlowtimeBreakMinutes,
+  getStrategyDescriptor,
+} from '../lib/studyMethods';
 
 export type AppModule = 'docs' | 'pomodoro' | 'board';
 
@@ -26,6 +39,8 @@ interface NavbarProps {
   currentModule: AppModule;
   onSwitchModule: (mod: AppModule) => void;
   settings: StudySettings;
+  onSelectStrategy?: (strategyId: StudyStrategyId) => Promise<void>;
+  onOpenDiagnosticModal?: () => void;
   onToggleAudio: () => void;
   user: UserProfile | null;
   syncStatus: 'local' | 'synced' | 'syncing' | 'error';
@@ -44,6 +59,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentModule,
   onSwitchModule,
   settings,
+  onSelectStrategy,
+  onOpenDiagnosticModal,
   onToggleAudio,
   user,
   syncStatus,
@@ -57,14 +74,25 @@ export const Navbar: React.FC<NavbarProps> = ({
   showOpenSidebarButton = false,
   onOpenSidebar,
 }) => {
-  const { mode, remainingSeconds, elapsedSeconds, isRunning, toggleTimer } = useTimer();
+  const {
+    mode,
+    activeStrategy,
+    isStopwatchActive,
+    remainingSeconds,
+    elapsedSeconds,
+    isRunning,
+    toggleTimer,
+    stopFlowtimeForFatigue,
+  } = useTimer();
   const [rightIslandCompact, setRightIslandCompact] = useState(false);
+  const [strategyMenuOpen, setStrategyMenuOpen] = useState(false);
 
-  const isPageStopwatch = mode === 'study' && settings.intervalMode === 'pages';
-  const displaySec = isPageStopwatch ? elapsedSeconds : remainingSeconds;
+  const displaySec = isStopwatchActive ? elapsedSeconds : remainingSeconds;
   const mins = Math.floor(displaySec / 60);
   const secs = displaySec % 60;
   const formattedTime = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  const activeStrategyDesc = getStrategyDescriptor(activeStrategy);
+  const flowtimeBreakPreview = computeFlowtimeBreakMinutes(elapsedSeconds);
 
   const tabs: Array<{
     id: AppModule;
@@ -101,6 +129,116 @@ export const Navbar: React.FC<NavbarProps> = ({
   const userInitial = user
     ? (user.fullName || user.username || user.email || 'E').slice(0, 1).toUpperCase()
     : 'L';
+
+  const renderTimerControl = (compactShape: boolean) => (
+    <div className="relative flex items-center gap-0.5 flex-shrink-0">
+      <button
+        type="button"
+        onClick={toggleTimer}
+        title={isRunning ? 'Pausar temporizador' : 'Iniciar temporizador'}
+        className={`flex items-center gap-1 px-2 ${
+          compactShape ? 'py-1.5 rounded-xl' : 'py-1 xl:px-2.5 xl:py-1.5 rounded-lg'
+        } bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/35 text-slate-200 transition-colors`}
+      >
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${
+            isRunning
+              ? activeStrategy === 'flowtime' && mode === 'study'
+                ? 'bg-emerald-400 animate-pulse'
+                : 'bg-indigo-400 animate-pulse'
+              : 'bg-indigo-500'
+          }`}
+        />
+        <span className="font-mono font-semibold text-[11px]">{formattedTime}</span>
+        {isRunning ? (
+          <Pause className="w-3 h-3 text-indigo-300" />
+        ) : (
+          <Play className="w-3 h-3 text-indigo-300" />
+        )}
+      </button>
+
+      {mode === 'study' && activeStrategy === 'flowtime' && (
+        <button
+          type="button"
+          onClick={stopFlowtimeForFatigue}
+          title={`Detener Flowtime por fatiga (descanso proporcional: ${flowtimeBreakPreview} min)`}
+          className={`flex items-center gap-1 px-1.5 ${
+            compactShape ? 'py-1.5 rounded-xl' : 'py-1 rounded-lg'
+          } bg-amber-600/25 hover:bg-amber-600/40 border border-amber-500/45 text-amber-200 text-[10px] font-semibold transition-colors`}
+        >
+          <Square className="w-2.5 h-2.5 fill-current" />
+          <span className="hidden xl:inline">{flowtimeBreakPreview}m</span>
+        </button>
+      )}
+
+      {onSelectStrategy && (
+        <button
+          type="button"
+          onClick={() => setStrategyMenuOpen((v) => !v)}
+          title={`Estrategia activa: ${activeStrategyDesc.name}`}
+          aria-label="Cambiar estrategia de estudio"
+          className={`p-1.5 ${
+            compactShape ? 'rounded-xl' : 'rounded-lg'
+          } bg-slate-800/80 hover:bg-indigo-500/20 border border-slate-700/70 text-slate-300 transition-colors`}
+        >
+          <ChevronDown className="w-3 h-3 text-indigo-300" />
+        </button>
+      )}
+
+      {strategyMenuOpen && onSelectStrategy && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setStrategyMenuOpen(false)}
+          />
+          <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-slate-900 border border-indigo-500/35 shadow-2xl p-2 z-50 space-y-1 text-xs fade-in">
+            <div className="px-2 py-1 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <span>Estrategia de estudio</span>
+              <span className="text-indigo-300">{activeStrategyDesc.shortName}</span>
+            </div>
+            {STUDY_STRATEGY_CATALOG.map((item) => {
+              const selected = item.id === activeStrategy;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setStrategyMenuOpen(false);
+                    void onSelectStrategy(item.id);
+                  }}
+                  className={`w-full text-left px-2.5 py-1.5 rounded-xl border transition-colors ${
+                    selected
+                      ? 'bg-indigo-600/25 border-indigo-400 text-white'
+                      : 'bg-slate-950/60 border-slate-800/80 text-slate-300 hover:border-indigo-500/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-[11px]">{item.shortName}</span>
+                    <span className="font-mono text-[10px] text-indigo-300">
+                      {item.badge}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+            {onOpenDiagnosticModal && (
+              <button
+                type="button"
+                onClick={() => {
+                  setStrategyMenuOpen(false);
+                  onOpenDiagnosticModal();
+                }}
+                className="w-full mt-1 py-1.5 px-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-semibold text-[11px] flex items-center justify-center gap-1.5"
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>Diagnóstico: sugerirme estrategia</span>
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
 
   // MODO ISLAS DINÁMICAS (Por defecto)
   if (layoutStyle === 'islands') {
@@ -164,25 +302,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Burbuja derecha estilo Dynamic Island (compactable) */}
         <div className="flex items-center justify-end flex-1 min-w-0">
           <div className="pointer-events-auto flex items-center gap-1 rounded-2xl bg-slate-900/85 backdrop-blur-xl border border-indigo-500/30 shadow-xl p-1 text-xs max-w-full">
-            {/* Temporizador rápido */}
-            <button
-              type="button"
-              onClick={toggleTimer}
-              title={isRunning ? 'Pausar temporizador' : 'Iniciar temporizador'}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/35 text-slate-200 transition-colors flex-shrink-0"
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  isRunning ? 'bg-indigo-400 animate-pulse' : 'bg-indigo-500'
-                }`}
-              />
-              <span className="font-mono font-semibold text-[11px]">{formattedTime}</span>
-              {isRunning ? (
-                <Pause className="w-3 h-3 text-indigo-300" />
-              ) : (
-                <Play className="w-3 h-3 text-indigo-300" />
-              )}
-            </button>
+            {/* Temporizador rápido y Selector de estrategia */}
+            {renderTimerControl(true)}
 
             {!rightIslandCompact && (
               <>
@@ -348,26 +469,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </nav>
 
       <div className="flex items-center gap-1 sm:gap-1.5 text-xs flex-shrink-0 whitespace-nowrap">
-        <button
-          type="button"
-          onClick={toggleTimer}
-          title={isRunning ? 'Pausar temporizador' : 'Iniciar temporizador'}
-          className="flex items-center gap-1 sm:gap-1.5 px-2 py-1 xl:px-2.5 xl:py-1.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/35 text-slate-200 transition-colors"
-        >
-          <span
-            className={`w-2 h-2 rounded-full ${
-              isRunning ? 'bg-indigo-400 animate-pulse' : 'bg-indigo-500'
-            }`}
-          />
-          <span className="font-mono font-semibold text-[11px] xl:text-xs">
-            {formattedTime}
-          </span>
-          {isRunning ? (
-            <Pause className="w-3 h-3 text-indigo-300" />
-          ) : (
-            <Play className="w-3 h-3 text-indigo-300" />
-          )}
-        </button>
+        {renderTimerControl(false)}
 
         <button
           type="button"

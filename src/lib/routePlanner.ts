@@ -7,6 +7,7 @@ import {
   StudyPlanResult,
   StudySettings,
 } from '../types/studyflow';
+import { resolveActiveStrategyId } from './studyMethods';
 
 export interface GenerateRouteParams {
   documents: DocumentRecord[];
@@ -14,6 +15,7 @@ export interface GenerateRouteParams {
   settings: StudySettings;
   deadline: string;
   completedStepIds?: string[];
+  overdueStepIds?: string[];
   now?: Date;
 }
 
@@ -23,6 +25,8 @@ interface PendingDocSlice {
   folderName?: string;
   cursor: number;
   endPage: number;
+  deadlineMs: number | null;
+  weight: number;
 }
 
 interface RawStudyBlock {
@@ -59,10 +63,13 @@ export function generateStudyRoute({
   settings,
   deadline,
   completedStepIds = [],
+  overdueStepIds = [],
   now = new Date(),
 }: GenerateRouteParams): StudyPlanResult {
   const folderMap = new Map(folders.map((f) => [f.id, f.name]));
   const completedSet = new Set(completedStepIds);
+  const overdueSet = new Set(overdueStepIds);
+  const activeStrategy = resolveActiveStrategyId(settings);
 
   const validDocs = documents.filter((doc) => (doc.pageCount || 0) > 0);
   const speed = Math.max(0.5, settings.speedMinPerPage || 3);
@@ -73,6 +80,8 @@ export function generateStudyRoute({
   const everyN = Math.max(0, settings.longBreakEveryNBlocks || 0);
   const allocationMode = settings.blockAllocationMode || 'pack';
 
+  const globalDeadlineMs = deadline ? new Date(deadline).getTime() : NaN;
+
   let totalPages = 0;
   const docSlices: PendingDocSlice[] = validDocs.map((doc) => {
     const docTotalPages = Math.max(1, doc.pageCount);
@@ -80,18 +89,113 @@ export function generateStudyRoute({
       ? Math.min(Math.max(1, doc.currentPage || 1), docTotalPages)
       : 1;
     totalPages += Math.max(1, docTotalPages - startPage + 1);
+    const rawDocMs = doc.deadline
+      ? new Date(doc.deadline).getTime()
+      : globalDeadlineMs;
+    const deadlineMs = Number.isNaN(rawDocMs) ? null : rawDocMs;
     return {
       docId: doc.id,
       docName: doc.name,
       folderName: doc.folderId ? folderMap.get(doc.folderId) : undefined,
       cursor: startPage,
       endPage: docTotalPages,
+      deadlineMs,
+      weight: 1,
     };
   });
 
+  // Ponderación por cercanía de fecha límite para Interleaving
+  if (docSlices.length >= 2) {
+    const validMs = docSlices
+      .map((s) => s.deadlineMs)
+      .filter((ms): ms is number => ms !== null);
+    if (validMs.length > 0) {
+      const minMs = Math.min(...validMs);
+      const maxMs = Math.max(...validMs);
+      if (maxMs - minMs > 1000 * 60 * 60) {
+        docSlices.forEach((slice) => {
+          const ms = slice.deadlineMs ?? maxMs;
+          const ratio = 1 - (ms - minMs) / Math.max(1, maxMs - minMs);
+          slice.weight = ratio >= 0.66 ? 3 : ratio >= 0.33 ? 2 : 1;
+        });
+      }
+    }
+  }
+
   const studyBlocks: RawStudyBlock[] = [];
 
-  if (allocationMode === 'pack') {
+  if (activeStrategy === 'interleaving' && docSlices.length >= 2) {
+    // Round-Robin ponderado alternando entre 2–3 documentos activos por fecha límite
+    const sortedByUrgency = [...docSlices].sort((a, b) => {
+      if (a.deadlineMs !== null && b.deadlineMs !== null) {
+        return a.deadlineMs - b.deadlineMs;
+      }
+      return b.weight - a.weight;
+    });
+
+    const schedulePattern: number[] = [];
+    const activeWindowSize = Math.min(3, sortedByUrgency.length);
+
+    while (sortedByUrgency.some((s) => s.cursor <= s.endPage)) {
+      const pendingIndices: number[] = [];
+      for (let i = 0; i < sortedByUrgency.length && pendingIndices.length < activeWindowSize; i++) {
+        if (sortedByUrgency[i].cursor <= sortedByUrgency[i].endPage) {
+          pendingIndices.push(i);
+        }
+      }
+      if (pendingIndices.length === 0) break;
+
+      schedulePattern.length = 0;
+      const maxWeight = Math.max(...pendingIndices.map((idx) => sortedByUrgency[idx].weight));
+      for (let round = 0; round < maxWeight; round++) {
+        for (const idx of pendingIndices) {
+          if (round < sortedByUrgency[idx].weight) {
+            schedulePattern.push(idx);
+          }
+        }
+      }
+
+      for (const idx of schedulePattern) {
+        const doc = sortedByUrgency[idx];
+        const pagesLeft = doc.endPage - doc.cursor + 1;
+        if (pagesLeft <= 0) continue;
+
+        const targetPages =
+          settings.intervalMode === 'pages'
+            ? pagesPerBlockSetting
+            : Math.max(1, Math.floor(studyMin / speed));
+        const pagesToTake = Math.min(pagesLeft, targetPages);
+        const segEnd = doc.cursor + pagesToTake - 1;
+        const durationMinutes =
+          settings.intervalMode === 'pages'
+            ? Math.max(1, Math.round(pagesToTake * speed))
+            : Math.max(1, Math.min(studyMin, Math.round(pagesToTake * speed)));
+
+        doc.cursor = segEnd + 1;
+        const isLastOfDoc = doc.cursor > doc.endPage;
+        const nextRemaining = sortedByUrgency.find(
+          (candidate, cIdx) => cIdx !== idx && candidate.cursor <= candidate.endPage
+        );
+
+        studyBlocks.push({
+          segments: [
+            {
+              docId: doc.docId,
+              docName: doc.docName,
+              folderName: doc.folderName,
+              startPage: segEnd - pagesToTake + 1,
+              endPage: segEnd,
+              pageCount: pagesToTake,
+              estimatedMinutes: durationMinutes,
+            },
+          ],
+          durationMinutes,
+          finishedADoc: isLastOfDoc,
+          nextDocNameAfterBlock: nextRemaining?.docName,
+        });
+      }
+    }
+  } else if (allocationMode === 'pack') {
     let sliceIdx = 0;
 
     while (sliceIdx < docSlices.length) {
@@ -280,6 +384,9 @@ export function generateStudyRoute({
         ? firstSeg.docName
         : `${firstSeg.docName} + ${block.segments.length - 1} más`;
 
+    const isCompleted = completedSet.has(stepId);
+    const isOverdue = !isCompleted && overdueSet.has(stepId);
+
     rawSteps.push({
       id: stepId,
       order: stepOrder++,
@@ -292,7 +399,8 @@ export function generateStudyRoute({
       pageCount: totalBlockPages,
       segments: block.segments,
       durationMinutes: block.durationMinutes,
-      completed: completedSet.has(stepId),
+      completed: isCompleted,
+      status: isCompleted ? 'completed' : isOverdue ? 'overdue' : 'pending',
     });
 
     totalStudyBlocks++;
@@ -417,3 +525,113 @@ export function getDefaultDeadlineLocalString(daysAhead = 2): string {
   const tzOffsetMs = target.getTimezoneOffset() * 60000;
   return new Date(target.getTime() - tzOffsetMs).toISOString().slice(0, 16);
 }
+
+/**
+ * Marca un bloque de Timeboxing Estricto como desfasado y redistribuye las páginas
+ * no alcanzadas en los bloques futuros pendientes del mismo documento.
+ */
+export function redistributeStrictTimeboxSteps(
+  steps: RouteStep[],
+  overdueStepId: string,
+  reachedPage: number,
+  speedMinPerPage = 3
+): RouteStep[] {
+  const targetIdx = steps.findIndex((s) => s.id === overdueStepId);
+  if (targetIdx < 0) return steps;
+  const targetStep = steps[targetIdx];
+  const targetEnd = targetStep.endPage || 1;
+  const startPage = targetStep.startPage || 1;
+  const clampedReached = Math.max(startPage, Math.min(targetEnd, reachedPage));
+  const pendingPages = Math.max(0, targetEnd - clampedReached);
+
+  if (pendingPages <= 0) return steps;
+
+  const updated: RouteStep[] = steps.map((s) => ({
+    ...s,
+    segments: s.segments ? s.segments.map((seg) => ({ ...seg })) : undefined,
+  }));
+
+  updated[targetIdx].status = 'overdue';
+  updated[targetIdx].overduePagesRemaining = pendingPages;
+  updated[targetIdx].endPage = clampedReached;
+  updated[targetIdx].pageCount = Math.max(0, clampedReached - startPage + 1);
+
+  // Buscar bloques futuros pendientes del mismo documento
+  const futureDocIndices: number[] = [];
+  for (let i = targetIdx + 1; i < updated.length; i++) {
+    const st = updated[i];
+    if (
+      st.type === 'study' &&
+      !st.completed &&
+      st.docId === targetStep.docId
+    ) {
+      futureDocIndices.push(i);
+    }
+  }
+
+  if (futureDocIndices.length > 0) {
+    // Reempaquetar secuencialmente desde (clampedReached + 1) hasta el endPage del último bloque futuro del doc
+    const finalEndPage =
+      updated[futureDocIndices[futureDocIndices.length - 1]].endPage || targetEnd;
+    const totalRemainingPages = Math.max(1, finalEndPage - clampedReached);
+    let cursor = clampedReached + 1;
+
+    futureDocIndices.forEach((stepIdx, pos) => {
+      const blocksLeft = futureDocIndices.length - pos;
+      const pagesLeftNow = Math.max(0, finalEndPage - cursor + 1);
+      const take =
+        pos === futureDocIndices.length - 1
+          ? pagesLeftNow
+          : Math.max(1, Math.round(pagesLeftNow / blocksLeft));
+      const nextEnd = Math.min(finalEndPage, cursor + take - 1);
+      const st = updated[stepIdx];
+      st.startPage = cursor;
+      st.endPage = nextEnd;
+      st.pageCount = Math.max(1, nextEnd - cursor + 1);
+      if (st.segments && st.segments.length > 0) {
+        st.segments[0].startPage = st.startPage;
+        st.segments[0].endPage = st.endPage;
+        st.segments[0].pageCount = st.pageCount;
+      }
+      cursor = nextEnd + 1;
+    });
+    void totalRemainingPages;
+    return updated;
+  }
+
+  // Si no había bloques futuros del mismo documento, insertar bloque de recuperación justo después
+  const estMin = Math.max(5, Math.round(pendingPages * Math.max(0.5, speedMinPerPage)));
+  const recoveryStep: RouteStep = {
+    id: `recovery_${targetStep.id}_${Date.now()}`,
+    order: targetStep.order + 0.5,
+    dayNumber: targetStep.dayNumber,
+    dayLabel: targetStep.dayLabel,
+    type: 'study',
+    docId: targetStep.docId,
+    docName: `${targetStep.docName} (Recuperación)`,
+    folderName: targetStep.folderName,
+    startPage: clampedReached + 1,
+    endPage: targetEnd,
+    pageCount: pendingPages,
+    segments: targetStep.docId
+      ? [
+          {
+            docId: targetStep.docId,
+            docName: targetStep.docName,
+            folderName: targetStep.folderName,
+            startPage: clampedReached + 1,
+            endPage: targetEnd,
+            pageCount: pendingPages,
+            estimatedMinutes: estMin,
+          },
+        ]
+      : undefined,
+    durationMinutes: estMin,
+    completed: false,
+    status: 'pending',
+  };
+
+  updated.splice(targetIdx + 1, 0, recoveryStep);
+  return updated.map((s, idx) => ({ ...s, order: idx + 1 }));
+}
+

@@ -20,6 +20,7 @@ export interface DocumentRecord {
   uploadDate: string;
   storagePath?: string | null;
   data?: ArrayBuffer;
+  deadline?: string | null;
   ownerId?: string;
   ownerUsername?: string | null;
   sharedRole?: 'owner' | 'collaborator' | 'viewer';
@@ -29,6 +30,22 @@ export interface DocumentRecord {
 export type NoteColor = 'yellow' | 'cyan' | 'green' | 'lavender';
 
 export type KanbanZone = 'ideas' | 'preguntas' | 'resumen' | 'tareas';
+
+export type NoteFormat = 'standard' | 'cornell';
+
+export type FsrsRating = 'again' | 'hard' | 'good' | 'easy';
+
+export type FsrsCardLifecycle = 'new' | 'learning' | 'review' | 'relearning';
+
+export interface FsrsCardState {
+  state: FsrsCardLifecycle;
+  dueAt: string;
+  stability: number;
+  difficulty: number;
+  reps: number;
+  lapses: number;
+  lastReviewAt?: string;
+}
 
 export interface StickyNoteRecord {
   id: string;
@@ -43,6 +60,28 @@ export interface StickyNoteRecord {
   userId?: string;
   authorUsername?: string | null;
   isShared?: boolean;
+  format?: NoteFormat;
+  cornellCues?: string;
+  cornellSummary?: string;
+  isComplex?: boolean;
+  feynmanSimpleExplanation?: string;
+  feynmanGaps?: string;
+  feynmanCompletedAt?: string;
+  fsrs?: FsrsCardState;
+}
+
+export interface DocumentOcclusionRecord {
+  id: string;
+  docId: string;
+  page: number;
+  xRatio: number;
+  yRatio: number;
+  widthRatio: number;
+  heightRatio: number;
+  label?: string;
+  fsrs?: FsrsCardState;
+  createdAt: string;
+  userId?: string;
 }
 
 export interface TaskRecord {
@@ -58,12 +97,34 @@ export type CycleIntervalMode = 'time' | 'pages';
 
 export type BlockAllocationMode = 'pack' | 'exact_doc' | 'full_block';
 
+export type StudyStrategyId =
+  | 'pomodoro'
+  | 'flowtime'
+  | 'ultradian_90_20'
+  | 'ultradian_52_17'
+  | 'strict_timeboxing'
+  | 'interleaving'
+  | 'sq3r';
+
+export type SynthesisMethodId =
+  | 'standard_notes'
+  | 'cornell'
+  | 'fsrs_occlusion'
+  | 'feynman'
+  | 'sq3r';
+
 export type StudyPresetId =
   | 'classic'
   | 'deep'
   | 'compact'
   | 'marathon'
   | 'pages'
+  | 'flowtime'
+  | 'ultradian_90_20'
+  | 'ultradian_52_17'
+  | 'strict_timeboxing'
+  | 'interleaving'
+  | 'sq3r'
   | 'custom';
 
 export type ThemePresetId =
@@ -124,6 +185,9 @@ export interface AppearanceSettings {
 
 export interface StudySettings {
   presetId: StudyPresetId;
+  activeStrategy?: StudyStrategyId;
+  preferredSynthesis?: SynthesisMethodId;
+  defaultNoteFormat?: NoteFormat;
   intervalMode: CycleIntervalMode;
   blockAllocationMode: BlockAllocationMode;
   studyMinutes: number;
@@ -140,13 +204,34 @@ export interface StudySettings {
 
 export interface StudyMethodPreset {
   id: Exclude<StudyPresetId, 'custom'>;
+  strategyId?: StudyStrategyId;
   name: string;
   subtitle: string;
   badge: string;
   config: Partial<StudySettings>;
 }
 
+export interface StrategyDescriptor {
+  id: StudyStrategyId;
+  presetId: Exclude<StudyPresetId, 'custom'>;
+  name: string;
+  shortName: string;
+  category: 'timing' | 'retention' | 'guided';
+  tagline: string;
+  badge: string;
+  idealFor: string[];
+  recommendedSynthesis: SynthesisMethodId;
+  defaultNoteFormat: NoteFormat;
+  usesCountdown: boolean;
+  enablesSq3r: boolean;
+  isStrictTimebox: boolean;
+  isInterleaving: boolean;
+  defaultConfig: Partial<StudySettings>;
+}
+
 export type RouteStepType = 'study' | 'short_break' | 'long_break';
+
+export type RouteStepStatus = 'pending' | 'completed' | 'overdue';
 
 export interface RouteSegment {
   docId: string;
@@ -174,6 +259,8 @@ export interface RouteStep {
   segments?: RouteSegment[];
   durationMinutes: number;
   completed: boolean;
+  status?: RouteStepStatus;
+  overduePagesRemaining?: number;
 }
 
 export type FeasibilityStatus =
@@ -202,6 +289,25 @@ export type DiagnosticCriterion = 'balanced' | 'average' | 'max';
 
 export type DifficultyLevel = 'agile' | 'standard' | 'dense' | 'extreme';
 
+export type FocusPatternId = 'short_bursts' | 'flow_uninterrupted' | 'deep_immersion';
+
+export type PrimaryStudyGoalId =
+  | 'comprehension'
+  | 'retention'
+  | 'volume_deadline'
+  | 'multi_subject';
+
+export type TimePressureToleranceId = 'strict_goals' | 'flexible_pace';
+
+export type ReviewPreferenceId = 'structured_cornell' | 'active_recall' | 'guided_sq3r';
+
+export interface LearnerProfile {
+  focusPattern: FocusPatternId;
+  primaryGoal: PrimaryStudyGoalId;
+  timePressureTolerance: TimePressureToleranceId;
+  reviewPreference: ReviewPreferenceId;
+}
+
 export interface PageReadingSample {
   docId: string;
   docName: string;
@@ -215,6 +321,7 @@ export interface DiagnosticData {
   isActive: boolean;
   criterion: DiagnosticCriterion;
   samples: PageReadingSample[];
+  learnerProfile?: LearnerProfile;
   lastAppliedAt?: string;
 }
 
@@ -226,6 +333,16 @@ export interface DiagnosticStats {
   meanSeconds: number;
   medianSeconds: number;
   p75Seconds: number;
+}
+
+export interface StrategyMatchSuggestion {
+  strategyId: StudyStrategyId;
+  title: string;
+  compatibilityScore: number;
+  recommendedSynthesis: SynthesisMethodId;
+  synthesisLabel: string;
+  whyItFits: string;
+  suggestedSettings: Partial<StudySettings>;
 }
 
 export interface DiagnosticRecommendation {
@@ -245,6 +362,43 @@ export interface DiagnosticRecommendation {
     | 'speedMinPerPage'
     | 'pagesPerBlock'
   >;
+  strategyMatches?: StrategyMatchSuggestion[];
+}
+
+export type Sq3rStage = 'survey' | 'question' | 'read' | 'recite' | 'review';
+
+export interface Sq3rDocumentState {
+  docId: string;
+  stage: Sq3rStage;
+  surveyMinutesTarget: number;
+  surveyCompletedAt?: string;
+  questions: string[];
+  reciteText: string;
+  updatedAt: string;
+}
+
+export interface CalibrationSessionMetric {
+  id: string;
+  strategyId: StudyStrategyId;
+  strategyName: string;
+  realStudySeconds: number;
+  breakSeconds: number;
+  pagesAdvanced: number;
+  notesAndOcclusionsCreated: number;
+  effectivePagesPerMin: number;
+  synthesisPerHour: number;
+  fatigueRating: 1 | 2 | 3 | 4 | 5;
+  completedAt: string;
+}
+
+export interface CalibrationTourState {
+  isActive: boolean;
+  sequence: StudyStrategyId[];
+  currentIndex: number;
+  sessions: CalibrationSessionMetric[];
+  startedAt: string;
+  completedAt?: string;
+  recommendedWinner?: StudyStrategyId;
 }
 
 export interface PersistedPlanState {
@@ -252,7 +406,10 @@ export interface PersistedPlanState {
   selectedDocIds: string[];
   orderedDocIds: string[];
   completedStepIds: string[];
+  overdueStepIds?: string[];
   diagnostic?: DiagnosticData;
+  sq3rStates?: Record<string, Sq3rDocumentState>;
+  calibrationTour?: CalibrationTourState | null;
 }
 
 export interface ToastItem {

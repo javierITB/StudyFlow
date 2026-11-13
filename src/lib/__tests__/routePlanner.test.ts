@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { generateStudyRoute } from '../routePlanner';
-import { applyPresetToSettings, DEFAULT_STUDY_SETTINGS } from '../studyMethods';
+import {
+  generateStudyRoute,
+  redistributeStrictTimeboxSteps,
+} from '../routePlanner';
+import {
+  applyPresetToSettings,
+  applyStrategyToSettings,
+  DEFAULT_STUDY_SETTINGS,
+} from '../studyMethods';
 import { DocumentRecord, FolderRecord, StudySettings } from '../../types/studyflow';
 
 const SAMPLE_FOLDERS: FolderRecord[] = [
@@ -209,5 +216,74 @@ describe('StudyFlow routePlanner', () => {
       now,
     });
     expect(overloaded.feasibility).toBe('critical');
+  });
+
+  it('alterna documentos en Interleaving ponderando por cercania de fecha limite', () => {
+    const docs: DocumentRecord[] = [
+      {
+        ...SAMPLE_DOCS[0],
+        id: 'urgentDoc',
+        name: 'Urgente.pdf',
+        pageCount: 25,
+        currentPage: 1,
+        deadline: '2026-11-12T12:00:00Z',
+      },
+      {
+        ...SAMPLE_DOCS[1],
+        id: 'laterDoc',
+        name: 'Posterior.pdf',
+        pageCount: 25,
+        currentPage: 1,
+        deadline: '2026-11-16T20:00:00Z',
+      },
+    ];
+
+    const settings = applyStrategyToSettings(DEFAULT_STUDY_SETTINGS, 'interleaving');
+    const result = generateStudyRoute({
+      documents: docs,
+      folders: SAMPLE_FOLDERS,
+      settings,
+      deadline: '2026-11-16T20:00:00Z',
+      now: new Date('2026-11-11T10:00:00Z'),
+    });
+
+    const studyDocsOrder = result.steps
+      .filter((s) => s.type === 'study')
+      .map((s) => s.docId);
+
+    // Debe alternar ambos archivos y dar mayor frecuencia al documento urgente
+    expect(studyDocsOrder).toContain('urgentDoc');
+    expect(studyDocsOrder).toContain('laterDoc');
+    expect(studyDocsOrder.slice(0, 3)).toEqual(['urgentDoc', 'laterDoc', 'urgentDoc']);
+  });
+
+  it('marca bloque desfasado en Timeboxing estricto y redistribuye paginas pendientes', () => {
+    const docs: DocumentRecord[] = [
+      { ...SAMPLE_DOCS[0], id: 'doc1', name: 'Contrato.pdf', pageCount: 20, currentPage: 1 },
+    ];
+    const settings = applyStrategyToSettings(DEFAULT_STUDY_SETTINGS, 'strict_timeboxing');
+
+    const initial = generateStudyRoute({
+      documents: docs,
+      folders: SAMPLE_FOLDERS,
+      settings,
+      deadline: '2026-11-14T20:00:00Z',
+      now: new Date('2026-11-11T10:00:00Z'),
+    });
+
+    const firstStudy = initial.steps.find((s) => s.type === 'study')!;
+    expect(firstStudy.startPage).toBe(1);
+    expect(firstStudy.endPage).toBe(10);
+
+    // El usuario solo llego a la pagina 6 cuando vencio el timebox
+    const redistributed = redistributeStrictTimeboxSteps(initial.steps, firstStudy.id, 6, 3);
+    const updatedFirst = redistributed.find((s) => s.id === firstStudy.id)!;
+    const studySteps = redistributed.filter((s) => s.type === 'study');
+
+    expect(updatedFirst.status).toBe('overdue');
+    expect(updatedFirst.overduePagesRemaining).toBe(4);
+    expect(updatedFirst.endPage).toBe(6);
+    expect(studySteps[1].startPage).toBe(7);
+    expect(studySteps[studySteps.length - 1].endPage).toBe(20);
   });
 });

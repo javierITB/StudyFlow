@@ -1,4 +1,24 @@
 import { DocumentType, FolderColor, KanbanZone } from '../types/studyflow';
+import type { PptxSlide } from './pptxParser';
+
+export function extractPptxSlidePlainText(slide: PptxSlide | undefined | null): string {
+  if (!slide) return '';
+  const parts: string[] = [];
+  for (const el of slide.elements) {
+    if (el.kind === 'shape') {
+      el.paragraphs.forEach((p) => {
+        const line = p.runs.map((r) => r.text).join('').trim();
+        if (line) parts.push(line);
+      });
+    } else if (el.kind === 'table') {
+      el.rows.forEach((r) => {
+        const rowTxt = r.filter(Boolean).join(' | ');
+        if (rowTxt) parts.push(rowTxt);
+      });
+    }
+  }
+  return parts.join('\n').trim();
+}
 
 export function detectDocumentType(fileName: string, mimeType = ''): DocumentType {
   const lower = fileName.toLowerCase();

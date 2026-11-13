@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  computeAdaptiveStrategyRecommendation,
   computeDiagnosticStats,
   computeRecommendedPomodoro,
   mergeReadingSample,
 } from '../diagnosticEngine';
-import { PageReadingSample } from '../../types/studyflow';
+import { DocumentRecord, PageReadingSample } from '../../types/studyflow';
 
 describe('diagnosticEngine', () => {
   it('filtra saltos rapidos (<3s) y acumula tiempo activo por pagina', () => {
@@ -90,6 +91,59 @@ describe('diagnosticEngine', () => {
     expect(conservativeMax.recommendedSettings.studyMinutes).toBeLessThanOrEqual(
       balanced.recommendedSettings.studyMinutes
     );
+  });
+
+  it('sugiere estrategias adaptadas al perfil del estudiante, urgencia y documentos cargados', () => {
+    const flowRec = computeAdaptiveStrategyRecommendation({
+      samples: [],
+      learnerProfile: {
+        focusPattern: 'flow_uninterrupted',
+        primaryGoal: 'retention',
+        timePressureTolerance: 'flexible_pace',
+        reviewPreference: 'active_recall',
+      },
+      hoursUntilDeadline: 96,
+    });
+    expect(flowRec.strategyMatches?.[0].strategyId).toBe('flowtime');
+    expect(flowRec.strategyMatches?.[0].recommendedSynthesis).toBe('fsrs_occlusion');
+
+    const multiDocs: DocumentRecord[] = [
+      {
+        id: 'doc1',
+        folderId: null,
+        name: 'A.pdf',
+        fileType: 'pdf',
+        size: 100,
+        pageCount: 20,
+        currentPage: 1,
+        uploadDate: '',
+      },
+      {
+        id: 'doc2',
+        folderId: null,
+        name: 'B.pdf',
+        fileType: 'pdf',
+        size: 100,
+        pageCount: 25,
+        currentPage: 1,
+        uploadDate: '',
+      },
+    ];
+    const interleaveRec = computeAdaptiveStrategyRecommendation({
+      samples: [],
+      documents: multiDocs,
+      learnerProfile: {
+        focusPattern: 'short_bursts',
+        primaryGoal: 'multi_subject',
+        timePressureTolerance: 'flexible_pace',
+        reviewPreference: 'structured_cornell',
+      },
+      hoursUntilDeadline: 72,
+    });
+    expect(interleaveRec.strategyMatches?.some((m) => m.strategyId === 'interleaving')).toBe(
+      true
+    );
+    expect(interleaveRec.strategyMatches?.[0].recommendedSynthesis).toBe('cornell');
   });
 });
 

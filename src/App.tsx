@@ -1,35 +1,57 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppearanceSettings,
+  CalibrationTourState,
   CollaboratorPresence,
   DiagnosticCriterion,
   DiagnosticData,
   DiagnosticRecommendation,
+  DocumentOcclusionRecord,
   DocumentRecord,
   DocumentShareRecord,
   DocumentType,
   FolderColor,
   FolderRecord,
   FriendshipRecord,
+  LearnerProfile,
   PersistedPlanState,
   RouteSegment,
   RouteStep,
+  Sq3rDocumentState,
   StickyNoteRecord,
+  StrategyMatchSuggestion,
   StudyPlanResult,
   StudySettings,
+  StudyStrategyId,
   TaskRecord,
   ToastItem,
   UserProfile,
 } from './types/studyflow';
-import { DEFAULT_STUDY_SETTINGS } from './lib/studyMethods';
 import {
-  applyAppearanceToDocument,
+  DEFAULT_STUDY_SETTINGS,
+  applyStrategyToSettings,
+  getStrategyDescriptor,
+} from './lib/studyMethods';
+import {
   DEFAULT_APPEARANCE,
+  applyAppearanceToDocument,
   resolveAppearance,
 } from './lib/themes';
-import { mergeReadingSample } from './lib/diagnosticEngine';
+import {
+  DEFAULT_LEARNER_PROFILE,
+  mergeReadingSample,
+} from './lib/diagnosticEngine';
+import {
+  advanceCalibrationTour,
+  buildCalibrationSessionMetric,
+  createCalibrationTour,
+} from './lib/calibration';
 import { formatErrorMessageEs } from './lib/errorMessages';
-import { generateStudyRoute, getDefaultDeadlineLocalString } from './lib/routePlanner';
+import {
+  generateStudyRoute,
+  getDefaultDeadlineLocalString,
+  redistributeStrictTimeboxSteps,
+} from './lib/routePlanner';
 import {
   clearAllLocalData,
   dbDelete,
@@ -48,18 +70,24 @@ import {
   cloudDeleteDocument,
   cloudDeleteFolder,
   cloudDeleteNote,
+  cloudDeleteOcclusion,
   cloudDeleteTask,
   cloudSavePlanState,
   cloudSaveStudySettings,
   cloudUpsertDocument,
   cloudUpsertFolder,
   cloudUpsertNote,
+  cloudUpsertOcclusion,
   cloudUpsertTask,
   downloadDocumentBinaryFromCloud,
   fetchCloudSnapshot,
   uploadDocumentBinaryToCloud,
 } from './lib/cloudSync';
-import { TimerProvider, useTimer } from './context/TimerContext';
+import {
+  StudyBlockTelemetry,
+  TimerProvider,
+  useTimer,
+} from './context/TimerContext';
 import { AppModule, Navbar } from './components/Navbar';
 import { DocumentSidebar } from './components/DocumentSidebar';
 import { DocumentViewer } from './components/DocumentViewer';
@@ -69,6 +97,7 @@ import { ConfirmModal } from './components/ConfirmModal';
 import { ToastContainer } from './components/ToastContainer';
 import { AccountModal } from './components/AccountModal';
 import { DiagnosticModal } from './components/DiagnosticModal';
+import { FeynmanModal } from './components/FeynmanModal';
 import { AppearanceModal } from './components/AppearanceModal';
 import { TutorialOverlay } from './components/TutorialOverlay';
 import { AuthWelcomeModal } from './components/AuthWelcomeModal';
@@ -116,6 +145,7 @@ interface WorkspaceShellProps {
   sharedDocuments: DocumentRecord[];
   collaboratorsPresence: CollaboratorPresence[];
   notes: StickyNoteRecord[];
+  occlusions: DocumentOcclusionRecord[];
   tasks: TaskRecord[];
   studySettings: StudySettings;
   planState: PersistedPlanState;
@@ -143,6 +173,22 @@ interface WorkspaceShellProps {
   onCreateNote: (note: Omit<StickyNoteRecord, 'id' | 'createdAt'>) => Promise<void>;
   onUpdateNote: (noteId: string, patch: Partial<StickyNoteRecord>) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
+  onCreateOcclusion: (
+    occ: Omit<DocumentOcclusionRecord, 'id' | 'createdAt'>
+  ) => Promise<void>;
+  onUpdateOcclusion: (
+    id: string,
+    patch: Partial<DocumentOcclusionRecord>
+  ) => Promise<void>;
+  onDeleteOcclusion: (id: string) => Promise<void>;
+  onUpdateSq3rState: (next: Sq3rDocumentState) => void;
+  boardFilterDocId: string | null;
+  onOpenBoardForDoc: (docId: string) => void;
+  onOpenFeynman: (
+    note: StickyNoteRecord,
+    sourceImage?: string | null,
+    sourceText?: string | null
+  ) => void;
   onOpenNoteLocation: (docId: string, page: number, noteId: string) => void;
   diagnosticData: DiagnosticData;
   onToggleDiagnostic: (active: boolean) => void;
@@ -156,7 +202,12 @@ interface WorkspaceShellProps {
   onOpenDiagnosticModal: () => void;
   onStartDiagnosticInViewer: () => void;
   onUpdateSettings: (next: StudySettings) => Promise<void>;
+  onSelectStrategy: (strategyId: StudyStrategyId) => Promise<void>;
   onUpdatePlanState: (patch: Partial<PersistedPlanState>) => Promise<void>;
+  onUpdateDocDeadline: (docId: string, deadline: string | null) => Promise<void>;
+  calibrationTour: CalibrationTourState | null;
+  onStartCalibrationTour: (sequence?: StudyStrategyId[]) => void;
+  onCancelCalibrationTour: () => void;
   onToggleStepCompleted: (stepId: string) => Promise<void>;
   onAddTask: (title: string, docId: string | null, folderId: string | null) => Promise<void>;
   onToggleTask: (taskId: string) => Promise<void>;
@@ -176,6 +227,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   sharedDocuments,
   collaboratorsPresence,
   notes,
+  occlusions,
   tasks,
   studySettings,
   planState,
@@ -203,6 +255,13 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   onCreateNote,
   onUpdateNote,
   onDeleteNote,
+  onCreateOcclusion,
+  onUpdateOcclusion,
+  onDeleteOcclusion,
+  onUpdateSq3rState,
+  boardFilterDocId,
+  onOpenBoardForDoc,
+  onOpenFeynman,
   onOpenNoteLocation,
   diagnosticData,
   onToggleDiagnostic,
@@ -210,7 +269,12 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   onOpenDiagnosticModal,
   onStartDiagnosticInViewer,
   onUpdateSettings,
+  onSelectStrategy,
   onUpdatePlanState,
+  onUpdateDocDeadline,
+  calibrationTour,
+  onStartCalibrationTour,
+  onCancelCalibrationTour,
   onToggleStepCompleted,
   onAddTask,
   onToggleTask,
@@ -306,6 +370,8 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
               onToggleStepCompleted={onToggleStepCompleted}
               onOpenPlannerTab={() => setCurrentModule('pomodoro')}
               onCloseDrawer={() => onSetSidebarOpen(false)}
+              user={user}
+              onOpenAccountModal={onOpenAccountModal}
             />
           </div>
         </>
@@ -316,6 +382,8 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
           currentModule={currentModule}
           onSwitchModule={setCurrentModule}
           settings={studySettings}
+          onSelectStrategy={onSelectStrategy}
+          onOpenDiagnosticModal={onOpenDiagnosticModal}
           onToggleAudio={() => void onToggleAudio()}
           user={user}
           syncStatus={syncStatus}
@@ -338,9 +406,15 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 documentBuffer={activeBuffer}
                 isLoadingBuffer={isLoadingBuffer}
                 notes={notes}
+                occlusions={occlusions}
                 studySettings={studySettings}
                 planResult={planResult}
                 diagnosticData={diagnosticData}
+                sq3rState={
+                  activeDoc && planState.sq3rStates
+                    ? planState.sq3rStates[activeDoc.id] || null
+                    : null
+                }
                 highlightedNoteId={highlightedNoteId}
                 onChangePage={(docId, p) => void onChangePage(docId, p)}
                 onOpenDocumentAtPage={(docId, p) => void onOpenDocument(docId, p)}
@@ -353,6 +427,12 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 onCreateNote={onCreateNote}
                 onUpdateNote={onUpdateNote}
                 onDeleteNote={onDeleteNote}
+                onCreateOcclusion={onCreateOcclusion}
+                onUpdateOcclusion={onUpdateOcclusion}
+                onDeleteOcclusion={onDeleteOcclusion}
+                onUpdateSq3rState={onUpdateSq3rState}
+                onOpenBoardForDoc={onOpenBoardForDoc}
+                onOpenFeynman={onOpenFeynman}
                 onNotify={onNotify}
                 sidebarOpen={sidebarOpen}
                 onToggleSidebar={() => onSetSidebarOpen((v) => !v)}
@@ -379,10 +459,15 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
               planState={planState}
               planResult={planResult}
               diagnosticData={diagnosticData}
+              calibrationTour={calibrationTour}
               onStartDiagnosticInViewer={onStartDiagnosticInViewer}
               onOpenDiagnosticModal={onOpenDiagnosticModal}
               onUpdateSettings={onUpdateSettings}
+              onSelectStrategy={onSelectStrategy}
               onUpdatePlanState={onUpdatePlanState}
+              onUpdateDocDeadline={onUpdateDocDeadline}
+              onStartCalibrationTour={onStartCalibrationTour}
+              onCancelCalibrationTour={onCancelCalibrationTour}
               onStartRouteStepInViewer={(step, next) =>
                 void handleStartRouteStepInViewer(step, next)
               }
@@ -406,10 +491,15 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
               folders={folders}
               documents={documents}
               notes={notes}
+              occlusions={occlusions}
+              defaultNoteFormat={studySettings.defaultNoteFormat || 'standard'}
+              initialDocFilter={boardFilterDocId}
               onCreateNote={onCreateNote}
               onUpdateNote={onUpdateNote}
               onDeleteNote={onDeleteNote}
+              onUpdateOcclusion={onUpdateOcclusion}
               onOpenNoteLocation={onOpenNoteLocation}
+              onOpenFeynman={(note) => onOpenFeynman(note)}
               onNotify={onNotify}
             />
           </div>
@@ -425,6 +515,13 @@ export const App: React.FC = () => {
   const [folders, setFolders] = useState<FolderRecord[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [notes, setNotes] = useState<StickyNoteRecord[]>([]);
+  const [occlusions, setOcclusions] = useState<DocumentOcclusionRecord[]>([]);
+  const [boardFilterDocId, setBoardFilterDocId] = useState<string | null>(null);
+  const [feynmanTarget, setFeynmanTarget] = useState<{
+    note: StickyNoteRecord;
+    sourceImage: string | null;
+    sourceText: string | null;
+  } | null>(null);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [studySettings, setStudySettings] = useState<StudySettings>(
     DEFAULT_STUDY_SETTINGS
@@ -434,6 +531,20 @@ export const App: React.FC = () => {
     selectedDocIds: [],
     orderedDocIds: [],
     completedStepIds: [],
+  });
+  const [overdueStepAdjustments, setOverdueStepAdjustments] = useState<
+    Record<string, { reachedPage: number }>
+  >({});
+  const [calibrationSurveyTelemetry, setCalibrationSurveyTelemetry] =
+    useState<StudyBlockTelemetry | null>(null);
+  const sessionStartSnapshotRef = useRef<{
+    pagesByDoc: Record<string, number>;
+    notesCount: number;
+    occlusionsCount: number;
+  }>({
+    pagesByDoc: {},
+    notesCount: 0,
+    occlusionsCount: 0,
   });
 
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
@@ -544,6 +655,7 @@ export const App: React.FC = () => {
     setFolders(snap.folders);
     setDocuments(snap.documents);
     setNotes(snap.notes);
+    setOcclusions(snap.occlusions || []);
     setTasks(snap.tasks);
     setStudySettings({
       ...snap.studySettings,
@@ -610,6 +722,7 @@ export const App: React.FC = () => {
         setFolders(cloud.folders);
         setDocuments(cloud.documents);
         setNotes(cloud.notes);
+        setOcclusions(cloud.occlusions || []);
         setTasks(cloud.tasks);
         setUser((prev) =>
           prev && prev.id === profile.id
@@ -642,6 +755,7 @@ export const App: React.FC = () => {
           ...cloud.folders.map((f) => dbPut('folders', f)),
           ...cloud.documents.map((d) => dbPut('documents', d)),
           ...cloud.notes.map((n) => dbPut('notes', n)),
+          ...cloud.occlusions.map((o) => dbPut('occlusions', o)),
           ...cloud.tasks.map((t) => dbPut('tasks', t)),
           setSetting('studySettings', resolvedCloudSettings),
           setSetting('planState', resolvedPlan),
@@ -1143,6 +1257,104 @@ export const App: React.FC = () => {
     [notify, runCloudMutation]
   );
 
+  const handleCreateOcclusion = useCallback(
+    async (occ: Omit<DocumentOcclusionRecord, 'id' | 'createdAt'>) => {
+      const record: DocumentOcclusionRecord = {
+        ...occ,
+        id: `occ_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        createdAt: new Date().toISOString(),
+        userId: user?.id,
+      };
+      setOcclusions((prev) => [...prev, record]);
+      await dbPut('occlusions', record);
+      void runCloudMutation((uid) => cloudUpsertOcclusion(uid, record));
+    },
+    [user?.id, runCloudMutation]
+  );
+
+  const handleUpdateOcclusion = useCallback(
+    async (occlusionId: string, patch: Partial<DocumentOcclusionRecord>) => {
+      let nextOcc: DocumentOcclusionRecord | null = null;
+      setOcclusions((prev) =>
+        prev.map((o) => {
+          if (o.id !== occlusionId) return o;
+          nextOcc = { ...o, ...patch };
+          return nextOcc;
+        })
+      );
+      const existing = await dbGet<DocumentOcclusionRecord>('occlusions', occlusionId);
+      const merged = nextOcc || (existing ? { ...existing, ...patch } : null);
+      if (merged) {
+        await dbPut('occlusions', merged);
+        void runCloudMutation((uid) => cloudUpsertOcclusion(uid, merged));
+      }
+    },
+    [runCloudMutation]
+  );
+
+  const handleDeleteOcclusion = useCallback(
+    async (occlusionId: string) => {
+      await dbDelete('occlusions', occlusionId);
+      setOcclusions((prev) => prev.filter((o) => o.id !== occlusionId));
+      void runCloudMutation((uid) => cloudDeleteOcclusion(uid, occlusionId));
+    },
+    [runCloudMutation]
+  );
+
+  const handleUpdateDocDeadline = useCallback(
+    async (docId: string, deadline: string | null) => {
+      let updatedDoc: DocumentRecord | null = null;
+      setDocuments((prev) =>
+        prev.map((d) => {
+          if (d.id !== docId) return d;
+          updatedDoc = { ...d, deadline };
+          return updatedDoc;
+        })
+      );
+      const existing = await dbGet<DocumentRecord>('documents', docId);
+      const merged = updatedDoc || (existing ? { ...existing, deadline } : null);
+      if (merged) {
+        await dbPut('documents', merged);
+        void runCloudMutation((uid) => cloudUpsertDocument(uid, merged));
+      }
+    },
+    [runCloudMutation]
+  );
+
+  const handleUpdateSq3rState = useCallback(
+    (nextSq3r: Sq3rDocumentState) => {
+      setPlanState((prev) => {
+        const updated: PersistedPlanState = {
+          ...prev,
+          sq3rStates: {
+            ...(prev.sq3rStates || {}),
+            [nextSq3r.docId]: nextSq3r,
+          },
+        };
+        void setSetting('planState', updated);
+        void runCloudMutation((uid) => cloudSavePlanState(uid, updated));
+        return updated;
+      });
+    },
+    [runCloudMutation]
+  );
+
+  const handleOpenBoardForDoc = useCallback((docId: string) => {
+    setBoardFilterDocId(docId);
+    setCurrentModule('board');
+  }, []);
+
+  const handleOpenFeynman = useCallback(
+    (
+      note: StickyNoteRecord,
+      sourceImage: string | null = null,
+      sourceText: string | null = null
+    ) => {
+      setFeynmanTarget({ note, sourceImage, sourceText });
+    },
+    []
+  );
+
   const handleUpdateSettings = useCallback(
     async (next: StudySettings) => {
       setStudySettings(next);
@@ -1150,6 +1362,29 @@ export const App: React.FC = () => {
       void runCloudMutation((uid) => cloudSaveStudySettings(uid, next));
     },
     [runCloudMutation]
+  );
+
+  const captureSessionStartSnapshot = useCallback(() => {
+    const pagesByDoc: Record<string, number> = {};
+    documents.forEach((d) => {
+      pagesByDoc[d.id] = d.currentPage || 1;
+    });
+    sessionStartSnapshotRef.current = {
+      pagesByDoc,
+      notesCount: notes.length,
+      occlusionsCount: occlusions.length,
+    };
+  }, [documents, notes.length, occlusions.length]);
+
+  const handleSelectStrategy = useCallback(
+    async (strategyId: StudyStrategyId) => {
+      captureSessionStartSnapshot();
+      const next = applyStrategyToSettings(studySettings, strategyId);
+      await handleUpdateSettings(next);
+      const desc = getStrategyDescriptor(strategyId);
+      notify(`Estrategia activa: ${desc.name}`, 'success');
+    },
+    [studySettings, handleUpdateSettings, captureSessionStartSnapshot, notify]
   );
 
   const handleToggleAudio = useCallback(async () => {
@@ -1492,7 +1727,7 @@ export const App: React.FC = () => {
       });
   }, [documents, planState.selectedDocIds, planState.orderedDocIds]);
 
-  const planResult = useMemo(
+  const basePlanResult = useMemo(
     () =>
       generateStudyRoute({
         documents: orderedSelectedDocs,
@@ -1500,6 +1735,7 @@ export const App: React.FC = () => {
         settings: studySettings,
         deadline: planState.deadline,
         completedStepIds: planState.completedStepIds,
+        overdueStepIds: planState.overdueStepIds,
       }),
     [
       orderedSelectedDocs,
@@ -1507,6 +1743,192 @@ export const App: React.FC = () => {
       studySettings,
       planState.deadline,
       planState.completedStepIds,
+      planState.overdueStepIds,
+    ]
+  );
+
+  const planResult = useMemo<StudyPlanResult>(() => {
+    const entries = Object.entries(overdueStepAdjustments);
+    if (entries.length === 0) return basePlanResult;
+    let adjustedSteps = basePlanResult.steps;
+    for (const [stepId, info] of entries) {
+      adjustedSteps = redistributeStrictTimeboxSteps(
+        adjustedSteps,
+        stepId,
+        info.reachedPage,
+        studySettings.speedMinPerPage
+      );
+    }
+    return {
+      ...basePlanResult,
+      steps: adjustedSteps,
+    };
+  }, [basePlanResult, overdueStepAdjustments, studySettings.speedMinPerPage]);
+
+  const handleStrictBlockOverdue = useCallback(
+    (step: RouteStep, reachedPage: number) => {
+      setOverdueStepAdjustments((prev) => ({
+        ...prev,
+        [step.id]: { reachedPage },
+      }));
+      setPlanState((prev) => {
+        const nextOverdue = Array.from(
+          new Set([...(prev.overdueStepIds || []), step.id])
+        );
+        const updated: PersistedPlanState = {
+          ...prev,
+          overdueStepIds: nextOverdue,
+        };
+        void setSetting('planState', updated);
+        void runCloudMutation((uid) => cloudSavePlanState(uid, updated));
+        return updated;
+      });
+    },
+    [runCloudMutation]
+  );
+
+  const getDocCurrentPage = useCallback(
+    (docId: string): number => {
+      const found =
+        documents.find((d) => d.id === docId) ||
+        sharedDocuments.find((d) => d.id === docId);
+      return found?.currentPage || 1;
+    },
+    [documents, sharedDocuments]
+  );
+
+  const handleFlowtimeCompleted = useCallback(
+    (realStudySeconds: number, docId: string | null) => {
+      const snap = sessionStartSnapshotRef.current;
+      let pagesAdvanced = 0;
+      if (docId) {
+        const current = getDocCurrentPage(docId);
+        const startedAt = snap.pagesByDoc[docId] ?? current;
+        pagesAdvanced = Math.max(0, current - startedAt);
+      }
+      if (pagesAdvanced >= 1 && realStudySeconds >= 60) {
+        const realMinPerPage = Number(
+          Math.max(0.5, Math.min(30, realStudySeconds / 60 / pagesAdvanced)).toFixed(1)
+        );
+        void handleUpdateSettings({
+          ...studySettings,
+          speedMinPerPage: realMinPerPage,
+        });
+      }
+    },
+    [getDocCurrentPage, studySettings, handleUpdateSettings]
+  );
+
+  const handleStartCalibrationTour = useCallback(
+    (sequence?: StudyStrategyId[]) => {
+      const tour = createCalibrationTour(sequence);
+      const firstStrategy = tour.sequence[0];
+      const nextSettings = applyStrategyToSettings(studySettings, firstStrategy);
+      void handleUpdateSettings(nextSettings);
+      captureSessionStartSnapshot();
+      setPlanState((prev) => {
+        const updated: PersistedPlanState = { ...prev, calibrationTour: tour };
+        void setSetting('planState', updated);
+        void runCloudMutation((uid) => cloudSavePlanState(uid, updated));
+        return updated;
+      });
+      setDiagnosticModalOpen(false);
+      setCurrentModule('pomodoro');
+      notify(
+        `Calibración A/B iniciada (${tour.sequence.length} sesiones). Empezando con ${getStrategyDescriptor(firstStrategy).shortName}.`,
+        'success'
+      );
+    },
+    [studySettings, handleUpdateSettings, captureSessionStartSnapshot, runCloudMutation, notify]
+  );
+
+  const handleCancelCalibrationTour = useCallback(() => {
+    setCalibrationSurveyTelemetry(null);
+    setPlanState((prev) => {
+      const updated: PersistedPlanState = { ...prev, calibrationTour: null };
+      void setSetting('planState', updated);
+      void runCloudMutation((uid) => cloudSavePlanState(uid, updated));
+      return updated;
+    });
+    notify('Recorrido de Calibración A/B cancelado', 'info');
+  }, [runCloudMutation, notify]);
+
+  const handleBreakCompleted = useCallback(
+    (telemetry: StudyBlockTelemetry) => {
+      if (planState.calibrationTour?.isActive && telemetry.realStudySeconds >= 30) {
+        setCalibrationSurveyTelemetry(telemetry);
+      }
+    },
+    [planState.calibrationTour]
+  );
+
+  const handleSubmitCalibrationFatigue = useCallback(
+    (fatigueRating: 1 | 2 | 3 | 4 | 5) => {
+      const telemetry = calibrationSurveyTelemetry;
+      const tour = planState.calibrationTour;
+      setCalibrationSurveyTelemetry(null);
+      if (!telemetry || !tour || !tour.isActive) return;
+
+      const snap = sessionStartSnapshotRef.current;
+      let pagesAdvanced = 0;
+      documents.forEach((d) => {
+        const before = snap.pagesByDoc[d.id] ?? d.currentPage;
+        if (d.currentPage > before) {
+          pagesAdvanced += d.currentPage - before;
+        }
+      });
+      if (pagesAdvanced === 0 && telemetry.step?.pageCount) {
+        pagesAdvanced = telemetry.step.pageCount;
+      }
+      const notesDelta =
+        Math.max(0, notes.length - snap.notesCount) +
+        Math.max(0, occlusions.length - snap.occlusionsCount);
+
+      const currentStrategy = tour.sequence[tour.currentIndex] || telemetry.strategyId;
+      const metric = buildCalibrationSessionMetric({
+        strategyId: currentStrategy,
+        realStudySeconds: telemetry.realStudySeconds,
+        breakSeconds: telemetry.breakSeconds,
+        pagesAdvanced,
+        notesAndOcclusionsCreated: notesDelta,
+        fatigueRating,
+      });
+
+      const nextTour: CalibrationTourState = advanceCalibrationTour(tour, metric);
+      setPlanState((prev) => {
+        const updated: PersistedPlanState = { ...prev, calibrationTour: nextTour };
+        void setSetting('planState', updated);
+        void runCloudMutation((uid) => cloudSavePlanState(uid, updated));
+        return updated;
+      });
+
+      if (nextTour.isActive) {
+        const nextStrategy = nextTour.sequence[nextTour.currentIndex];
+        const nextSettings = applyStrategyToSettings(studySettings, nextStrategy);
+        void handleUpdateSettings(nextSettings);
+        captureSessionStartSnapshot();
+        notify(
+          `Sesión registrada. Siguiente bloque de calibración: ${getStrategyDescriptor(nextStrategy).shortName}.`,
+          'success'
+        );
+      } else if (nextTour.recommendedWinner) {
+        notify(
+          `Calibración completada: ${getStrategyDescriptor(nextTour.recommendedWinner).name} obtuvo el mejor equilibrio rendimiento/fatiga.`,
+          'success'
+        );
+      }
+    },
+    [
+      calibrationSurveyTelemetry,
+      planState.calibrationTour,
+      documents,
+      notes.length,
+      occlusions.length,
+      studySettings,
+      handleUpdateSettings,
+      captureSessionStartSnapshot,
+      runCloudMutation,
+      notify,
     ]
   );
 
@@ -1608,6 +2030,13 @@ export const App: React.FC = () => {
     [updateDiagnosticData]
   );
 
+  const handleChangeLearnerProfile = useCallback(
+    (learnerProfile: LearnerProfile) => {
+      updateDiagnosticData((prev) => ({ ...prev, learnerProfile }));
+    },
+    [updateDiagnosticData]
+  );
+
   const handleRemoveDiagnosticSample = useCallback(
     (docId: string, page: number) => {
       updateDiagnosticData((prev) => ({
@@ -1662,6 +2091,30 @@ export const App: React.FC = () => {
       );
     },
     [studySettings, handleUpdateSettings, updateDiagnosticData, notify]
+  );
+
+  const handleApplyStrategyMatch = useCallback(
+    (match: StrategyMatchSuggestion, rec: DiagnosticRecommendation) => {
+      captureSessionStartSnapshot();
+      const baseApplied = applyStrategyToSettings(studySettings, match.strategyId);
+      const nextSettings: StudySettings = {
+        ...baseApplied,
+        ...match.suggestedSettings,
+        speedMinPerPage: rec.recommendedSettings.speedMinPerPage,
+      };
+      void handleUpdateSettings(nextSettings);
+      updateDiagnosticData((prev) => ({
+        ...prev,
+        isActive: false,
+        lastAppliedAt: new Date().toISOString(),
+      }));
+      setDiagnosticModalOpen(false);
+      notify(
+        `Sistema aplicado: ${match.title} + ${match.synthesisLabel}`,
+        'success'
+      );
+    },
+    [studySettings, handleUpdateSettings, updateDiagnosticData, captureSessionStartSnapshot, notify]
   );
 
   const activeDoc = useMemo(
@@ -1758,8 +2211,12 @@ export const App: React.FC = () => {
     <TimerProvider
       settings={studySettings}
       plannedSteps={planResult.steps}
+      getDocCurrentPage={getDocCurrentPage}
       onNotify={notify}
       onStepCompleted={handleTimerRouteStepCompleted}
+      onStrictBlockOverdue={handleStrictBlockOverdue}
+      onBreakCompleted={handleBreakCompleted}
+      onFlowtimeCompleted={handleFlowtimeCompleted}
       onStepReopenedAndAdapted={handleStepReopenedAndAdapted}
       onRequestOpenSegment={handleRequestOpenSegment}
     >
@@ -1771,6 +2228,7 @@ export const App: React.FC = () => {
         sharedDocuments={sharedDocuments}
         collaboratorsPresence={collaboratorsPresence}
         notes={notes}
+        occlusions={occlusions}
         tasks={tasks}
         studySettings={studySettings}
         planState={planState}
@@ -1811,6 +2269,13 @@ export const App: React.FC = () => {
         onCreateNote={handleCreateNote}
         onUpdateNote={handleUpdateNote}
         onDeleteNote={handleDeleteNote}
+        onCreateOcclusion={handleCreateOcclusion}
+        onUpdateOcclusion={handleUpdateOcclusion}
+        onDeleteOcclusion={handleDeleteOcclusion}
+        onUpdateSq3rState={handleUpdateSq3rState}
+        boardFilterDocId={boardFilterDocId}
+        onOpenBoardForDoc={handleOpenBoardForDoc}
+        onOpenFeynman={handleOpenFeynman}
         onOpenNoteLocation={(docId, page, noteId) =>
           void handleOpenNoteLocation(docId, page, noteId)
         }
@@ -1820,7 +2285,12 @@ export const App: React.FC = () => {
         onOpenDiagnosticModal={() => setDiagnosticModalOpen(true)}
         onStartDiagnosticInViewer={handleStartDiagnosticInViewer}
         onUpdateSettings={handleUpdateSettings}
+        onSelectStrategy={handleSelectStrategy}
         onUpdatePlanState={handleUpdatePlanState}
+        onUpdateDocDeadline={handleUpdateDocDeadline}
+        calibrationTour={planState.calibrationTour || null}
+        onStartCalibrationTour={handleStartCalibrationTour}
+        onCancelCalibrationTour={handleCancelCalibrationTour}
         onToggleStepCompleted={handleToggleStepCompleted}
         onAddTask={handleAddTask}
         onToggleTask={handleToggleTask}
@@ -1901,14 +2371,38 @@ export const App: React.FC = () => {
         open={diagnosticModalOpen}
         isActive={diagnosticData.isActive}
         activeDoc={activeDoc}
+        documents={orderedSelectedDocs.length > 0 ? orderedSelectedDocs : documents}
+        hoursUntilDeadline={planResult.hoursUntilDeadline}
         samples={diagnosticData.samples}
         criterion={diagnosticData.criterion}
+        learnerProfile={diagnosticData.learnerProfile || DEFAULT_LEARNER_PROFILE}
         onClose={() => setDiagnosticModalOpen(false)}
         onToggleDiagnostic={handleToggleDiagnostic}
         onChangeCriterion={handleChangeDiagnosticCriterion}
+        onChangeLearnerProfile={handleChangeLearnerProfile}
         onRemoveSample={handleRemoveDiagnosticSample}
         onResetSamples={handleResetDiagnosticSamples}
         onApplyRecommendation={handleApplyDiagnosticProfile}
+        onApplyStrategyMatch={handleApplyStrategyMatch}
+        onStartCalibrationFromMatches={handleStartCalibrationTour}
+      />
+
+      <FeynmanModal
+        open={Boolean(feynmanTarget)}
+        note={feynmanTarget?.note || null}
+        sourceDoc={
+          feynmanTarget?.note.docId
+            ? documents.find((d) => d.id === feynmanTarget.note.docId) ||
+              sharedDocuments.find((d) => d.id === feynmanTarget.note.docId) ||
+              null
+            : null
+        }
+        sourcePageImage={feynmanTarget?.sourceImage || null}
+        sourcePageText={feynmanTarget?.sourceText || null}
+        onClose={() => setFeynmanTarget(null)}
+        onSaveFeynman={handleUpdateNote}
+        onAddReviewTask={handleAddTask}
+        onNotify={notify}
       />
 
       <AppearanceModal
@@ -1932,6 +2426,54 @@ export const App: React.FC = () => {
         onEnsureSidebarOpen={handleEnsureSidebarOpen}
         onEnsurePomodoroSession={handleEnsurePomodoroSession}
       />
+
+      {/* Encuesta rápida de 1 clic al finalizar descanso en Calibración A/B */}
+      {calibrationSurveyTelemetry && (
+        <div className="fixed bottom-4 right-4 z-50 max-w-xs w-full bg-slate-900/95 backdrop-blur-xl border border-emerald-500/45 rounded-2xl p-3.5 shadow-2xl space-y-2.5 fade-in">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 block">
+                Calibración A/B · Encuesta 1 clic
+              </span>
+              <h4 className="text-xs font-semibold text-white mt-0.5">
+                ¿Qué nivel de fatiga sentiste con{' '}
+                {getStrategyDescriptor(calibrationSurveyTelemetry.strategyId).shortName}?
+              </h4>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCalibrationSurveyTelemetry(null)}
+              className="text-slate-400 hover:text-white text-xs px-1"
+              title="Omitir"
+            >
+              ×
+            </button>
+          </div>
+          <div className="grid grid-cols-5 gap-1.5">
+            {([1, 2, 3, 4, 5] as const).map((rating) => (
+              <button
+                key={rating}
+                type="button"
+                onClick={() => handleSubmitCalibrationFatigue(rating)}
+                className="py-1.5 rounded-xl bg-slate-950 hover:bg-emerald-600 border border-slate-700 hover:border-emerald-400 text-xs font-mono font-bold text-white transition-colors"
+                title={
+                  rating === 1
+                    ? '1 - Muy fresco'
+                    : rating === 5
+                      ? '5 - Agotado'
+                      : `Nivel ${rating}`
+                }
+              >
+                {rating}
+              </button>
+            ))}
+          </div>
+          <div className="flex justify-between text-[10px] text-slate-400 px-0.5">
+            <span>1 = Muy fresco</span>
+            <span>5 = Fatiga alta</span>
+          </div>
+        </div>
+      )}
 
       <ToastContainer toasts={toasts} />
     </TimerProvider>

@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
+  AlertTriangle,
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  Award,
   Calendar,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clock,
+  FlaskConical,
   Folder,
   Gauge,
   Link2,
@@ -19,10 +22,13 @@ import {
   Route,
   SkipForward,
   Sliders,
+  Sparkles,
   Trash2,
+  X,
   Zap,
 } from 'lucide-react';
 import {
+  CalibrationTourState,
   DiagnosticData,
   DocumentRecord,
   FolderRecord,
@@ -31,9 +37,23 @@ import {
   StudyMethodPreset,
   StudyPlanResult,
   StudySettings,
+  StudyStrategyId,
   TaskRecord,
 } from '../types/studyflow';
-import { STUDY_METHOD_PRESETS, applyPresetToSettings } from '../lib/studyMethods';
+import {
+  STUDY_METHOD_PRESETS,
+  STUDY_STRATEGY_CATALOG,
+  applyPresetToSettings,
+  applyStrategyToSettings,
+  computeFlowtimeBreakMinutes,
+  getStrategyDescriptor,
+  resolveActiveStrategyId,
+} from '../lib/studyMethods';
+import {
+  DEFAULT_CALIBRATION_SEQUENCE,
+  EXTENDED_CALIBRATION_SEQUENCE,
+  computeCalibrationCompositeScore,
+} from '../lib/calibration';
 import { computeRecommendedPomodoro } from '../lib/diagnosticEngine';
 import { useTimer } from '../context/TimerContext';
 import { RouteTimeline } from './RouteTimeline';
@@ -46,10 +66,15 @@ interface PomodoroAndPlannerProps {
   planState: PersistedPlanState;
   planResult: StudyPlanResult;
   diagnosticData: DiagnosticData;
+  calibrationTour?: CalibrationTourState | null;
   onStartDiagnosticInViewer: () => void;
   onOpenDiagnosticModal: () => void;
   onUpdateSettings: (next: StudySettings) => Promise<void>;
   onUpdatePlanState: (patch: Partial<PersistedPlanState>) => Promise<void>;
+  onUpdateDocDeadline?: (docId: string, deadline: string | null) => Promise<void>;
+  onSelectStrategy?: (strategyId: StudyStrategyId) => Promise<void>;
+  onStartCalibrationTour?: (sequence?: StudyStrategyId[]) => void;
+  onCancelCalibrationTour?: () => void;
   onStartRouteStepInViewer: (step: RouteStep, nextStep: RouteStep | null) => void;
   onToggleStepCompleted: (stepId: string) => Promise<void>;
   onAddTask: (title: string, docId: string | null, folderId: string | null) => Promise<void>;
@@ -79,10 +104,15 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
   planState,
   planResult,
   diagnosticData,
+  calibrationTour = null,
   onStartDiagnosticInViewer,
   onOpenDiagnosticModal,
   onUpdateSettings,
   onUpdatePlanState,
+  onUpdateDocDeadline,
+  onSelectStrategy,
+  onStartCalibrationTour,
+  onCancelCalibrationTour,
   onStartRouteStepInViewer,
   onToggleStepCompleted,
   onAddTask,
@@ -93,6 +123,8 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
 }) => {
   const {
     mode,
+    activeStrategy,
+    isStopwatchActive,
     remainingSeconds,
     elapsedSeconds,
     totalDurationSeconds,
@@ -100,10 +132,15 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
     cyclesCompleted,
     totalPlannedBlocks,
     activeRouteStep,
+    strictOverduePrompt,
     setMode,
     toggleTimer,
     resetTimer,
     skipCycle,
+    stopFlowtimeForFatigue,
+    resolveStrictOverdueWithBreak,
+    resolveStrictOverdueWithExtraTime,
+    dismissStrictOverduePrompt,
     setTotalPlannedBlocks,
     completeCurrentBlock,
   } = useTimer();
@@ -113,6 +150,23 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
   const [rightTab, setRightTab] = useState<'route' | 'tasks'>('route');
   const [showAdvancedCycles, setShowAdvancedCycles] = useState<boolean>(false);
   const [showTaskLinks, setShowTaskLinks] = useState<boolean>(false);
+  const [showCalibrationPanel, setShowCalibrationPanel] = useState<boolean>(false);
+
+  const activeDescriptor = useMemo(
+    () => getStrategyDescriptor(resolveActiveStrategyId(settings)),
+    [settings]
+  );
+
+  const handleSelectStrategy = async (strategyId: StudyStrategyId) => {
+    if (onSelectStrategy) {
+      await onSelectStrategy(strategyId);
+      return;
+    }
+    const next = applyStrategyToSettings(settings, strategyId);
+    await onUpdateSettings(next);
+    const desc = getStrategyDescriptor(strategyId);
+    onNotify(`Estrategia activa: ${desc.name}`, 'success');
+  };
 
   useEffect(() => {
     if (forceSessionKey > 0) {
@@ -239,16 +293,16 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
     (s) => s.type === 'study' && s.completed
   ).length;
 
-  const isPageStopwatch = mode === 'study' && settings.intervalMode === 'pages';
-  const displaySec = isPageStopwatch ? elapsedSeconds : remainingSeconds;
+  const displaySec = isStopwatchActive ? elapsedSeconds : remainingSeconds;
   const clockMins = Math.floor(displaySec / 60);
   const clockSecs = displaySec % 60;
   const formattedClock = `${String(clockMins).padStart(2, '0')}:${String(clockSecs).padStart(2, '0')}`;
   const circumference = 276.46;
-  const progressRatio = isPageStopwatch
+  const progressRatio = isStopwatchActive
     ? (elapsedSeconds % 60) / 60
     : remainingSeconds / Math.max(1, totalDurationSeconds);
   const strokeOffset = circumference * (1 - progressRatio);
+  const flowtimePreviewBreak = computeFlowtimeBreakMinutes(elapsedSeconds);
 
   const effectiveGoal = totalPlannedBlocks || planResult.totalStudyBlocks || 1;
   const goalCompleted = Math.max(cyclesCompleted, completedRouteBlocksCount);
@@ -306,14 +360,6 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
     () =>
       computeRecommendedPomodoro(diagnosticData.samples, diagnosticData.criterion),
     [diagnosticData.samples, diagnosticData.criterion]
-  );
-
-  const quickPresets = STUDY_METHOD_PRESETS.filter(
-    (p) =>
-      p.id === 'classic' ||
-      p.id === 'deep' ||
-      p.id === 'compact' ||
-      p.id === 'pages'
   );
 
   return (
@@ -387,6 +433,37 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
             {/* IZQUIERDA: RELOJ POMODORO LIMPIO + CAMBIO RÁPIDO */}
             <div data-tour-id="tour-pomodoro-clock" className="lg:col-span-5 space-y-3 sm:space-y-4">
               <div className="bg-slate-900/95 backdrop-blur-md border border-indigo-500/25 sf-accent-glow rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col items-center">
+                {/* Banner de Calibración A/B activa */}
+                {calibrationTour?.isActive && (
+                  <div className="w-full mb-3 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/35 flex items-center justify-between gap-2 text-xs">
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 flex items-center gap-1">
+                        <FlaskConical className="w-3 h-3" />
+                        Calibración A/B · Sesión {calibrationTour.currentIndex + 1}/
+                        {calibrationTour.sequence.length}
+                      </span>
+                      <span className="text-white font-semibold truncate block">
+                        Probando:{' '}
+                        {
+                          getStrategyDescriptor(
+                            calibrationTour.sequence[calibrationTour.currentIndex]
+                          ).name
+                        }
+                      </span>
+                    </div>
+                    {onCancelCalibrationTour && (
+                      <button
+                        type="button"
+                        onClick={onCancelCalibrationTour}
+                        title="Detener recorrido de calibración"
+                        className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {/* Selector Estudio | Descanso Corto | Descanso Largo */}
                 <div className="flex flex-wrap items-center justify-center gap-1.5 bg-slate-950/85 p-1 rounded-xl border border-indigo-500/25 mb-4">
                   <button
@@ -398,9 +475,11 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    {settings.intervalMode === 'pages'
-                      ? `Meta ${settings.pagesPerBlock} págs`
-                      : `Estudio (${settings.studyMinutes}m)`}
+                    {activeStrategy === 'flowtime'
+                      ? 'Flowtime (Libre)'
+                      : settings.intervalMode === 'pages'
+                        ? `Meta ${settings.pagesPerBlock} págs`
+                        : `Estudio (${settings.studyMinutes}m)`}
                   </button>
                   <button
                     type="button"
@@ -426,12 +505,57 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
                   </button>
                 </div>
 
+                {/* Aviso no bloqueante si Timeboxing estricto marcó desfase */}
+                {strictOverduePrompt && (
+                  <div className="w-full mb-3 p-3 rounded-xl bg-amber-500/15 border border-amber-500/45 space-y-2 text-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-bold text-amber-200">
+                            Bloque desfasado: faltaron {strictOverduePrompt.remainingPages}{' '}
+                            págs
+                          </div>
+                          <p className="text-[11px] text-amber-100/80">
+                            Se redistribuyeron automáticamente en tus próximos bloques.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={dismissStrictOverduePrompt}
+                        className="text-amber-300/70 hover:text-white"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={resolveStrictOverdueWithBreak}
+                        className="flex-1 py-1.5 px-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[11px]"
+                      >
+                        Iniciar descanso ({strictOverduePrompt.recommendedBreakMinutes}m)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => resolveStrictOverdueWithExtraTime(5)}
+                        className="py-1.5 px-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px]"
+                      >
+                        +5 min extra
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Paso activo o siguiente bloque sugerido */}
                 {activeRouteStep ? (
                   <div className="w-full mb-4 px-3 py-2 rounded-xl bg-indigo-500/15 border border-indigo-500/35 flex items-center justify-between gap-2 text-xs">
                     <div className="min-w-0">
                       <span className="text-[10px] uppercase tracking-wider text-indigo-300 font-semibold block">
-                        En curso ahora
+                        {activeStrategy === 'strict_timeboxing'
+                          ? 'Meta cerrada Timeboxing'
+                          : 'En curso ahora'}
                       </span>
                       <span className="text-white font-medium truncate block">
                         {activeRouteStep.docName}
@@ -500,7 +624,9 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
                       strokeLinecap="round"
                       className={`transition-all duration-300 ${
                         mode === 'study'
-                          ? 'text-indigo-500'
+                          ? activeStrategy === 'flowtime'
+                            ? 'text-emerald-500'
+                            : 'text-indigo-500'
                           : mode === 'short'
                             ? 'text-sky-500'
                             : 'text-purple-500'
@@ -515,15 +641,19 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
                     </span>
                     <span className="text-[11px] font-medium uppercase tracking-widest text-indigo-400 mt-1.5">
                       {mode === 'study'
-                        ? settings.intervalMode === 'pages'
-                          ? 'Avance por Páginas'
-                          : 'Sesión de Estudio'
+                        ? activeStrategy === 'flowtime'
+                          ? 'Flowtime Ascendente'
+                          : settings.intervalMode === 'pages'
+                            ? 'Avance por Páginas'
+                            : activeDescriptor.shortName
                         : mode === 'short'
                           ? 'Descanso Corto'
                           : 'Descanso Largo'}
                     </span>
                     <span className="text-[11px] text-slate-400 mt-0.5">
-                      Bloque #{cyclesCompleted + 1}
+                      {mode === 'study' && activeStrategy === 'flowtime'
+                        ? `Descanso al parar: ~${flowtimePreviewBreak}m`
+                        : `Bloque #${cyclesCompleted + 1}`}
                     </span>
                   </div>
                 </div>
@@ -548,16 +678,28 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
                     <span>{isRunning ? 'Pausar' : 'Iniciar'}</span>
                   </button>
 
-                  {mode === 'study' && (
+                  {mode === 'study' && activeStrategy === 'flowtime' ? (
                     <button
                       type="button"
-                      onClick={completeCurrentBlock}
-                      title="Marcar bloque completado y pasar a descanso"
-                      className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5"
+                      onClick={stopFlowtimeForFatigue}
+                      title="Detener sesión por fatiga e iniciar descanso proporcional automático"
+                      className="px-3.5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      <span>Completar</span>
+                      <span>Detener por fatiga ({flowtimePreviewBreak}m)</span>
                     </button>
+                  ) : (
+                    mode === 'study' && (
+                      <button
+                        type="button"
+                        onClick={completeCurrentBlock}
+                        title="Marcar bloque completado y pasar a descanso"
+                        className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Completar</span>
+                      </button>
+                    )
                   )}
 
                   <button
@@ -587,64 +729,178 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
                 </div>
               </div>
 
-              {/* Cambio rápido de ritmo en 1 clic sin abrumar */}
-              <div className="bg-slate-900/90 backdrop-blur-md border border-indigo-500/20 rounded-2xl p-4 space-y-2.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-200">Ritmo rápido</span>
-                  <button
-                    type="button"
-                    onClick={() => setPlannerView('setup')}
-                    className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1 font-medium"
-                  >
-                    <Sliders className="w-3 h-3" />
-                    <span>Personalizar</span>
-                  </button>
+              {/* Selector Directo de Estrategia + Diagnóstico + Calibración A/B */}
+              <div className="bg-slate-900/90 backdrop-blur-md border border-indigo-500/20 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between text-xs gap-2">
+                  <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Selector de Estrategia</span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCalibrationPanel((v) => !v)}
+                      className="text-[11px] text-emerald-300 hover:text-emerald-200 flex items-center gap-1 font-medium"
+                    >
+                      <FlaskConical className="w-3 h-3" />
+                      <span>Calibración A/B</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPlannerView('setup')}
+                      className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1 font-medium"
+                    >
+                      <Sliders className="w-3 h-3" />
+                      <span>Ajustar</span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-1.5">
-                  {quickPresets.map((preset) => {
-                    const active = settings.presetId === preset.id;
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {STUDY_STRATEGY_CATALOG.map((strategy) => {
+                    const active = activeStrategy === strategy.id;
                     return (
                       <button
-                        key={preset.id}
+                        key={strategy.id}
                         type="button"
-                        onClick={() => void handleSelectPreset(preset.id)}
+                        onClick={() => void handleSelectStrategy(strategy.id)}
+                        title={strategy.tagline}
                         className={`px-2.5 py-2 rounded-xl border text-left transition-all ${
                           active
-                            ? 'bg-indigo-500/20 border-indigo-400 text-white'
+                            ? 'bg-indigo-500/20 border-indigo-400 text-white shadow-sm'
                             : 'bg-slate-950/45 border-slate-800 text-slate-300 hover:border-indigo-500/40'
                         }`}
                       >
-                        <div className="text-[11px] font-semibold truncate">{preset.name}</div>
-                        <div className="text-[10px] font-mono text-indigo-300 mt-0.5">
-                          {preset.badge}
+                        <div className="text-[11px] font-semibold truncate">
+                          {strategy.shortName}
+                        </div>
+                        <div className="text-[10px] font-mono text-indigo-300 mt-0.5 truncate">
+                          {strategy.badge}
                         </div>
                       </button>
                     );
                   })}
                 </div>
 
+                {/* Panel de Recorrido de Calibración A/B */}
+                {(showCalibrationPanel || calibrationTour) && (
+                  <div className="p-3 rounded-xl bg-slate-950/85 border border-emerald-500/30 space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-emerald-300 flex items-center gap-1.5 text-[11px]">
+                        <FlaskConical className="w-3.5 h-3.5" />
+                        Recorrido de Calibración (Prueba A/B)
+                      </span>
+                      {!calibrationTour?.isActive && onStartCalibrationTour && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onStartCalibrationTour(DEFAULT_CALIBRATION_SEQUENCE)
+                            }
+                            className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[10px]"
+                          >
+                            Iniciar 3 sesiones
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onStartCalibrationTour(EXTENDED_CALIBRATION_SEQUENCE)
+                            }
+                            className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[10px]"
+                          >
+                            4 sesiones
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {!calibrationTour || calibrationTour.sessions.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        {calibrationTour?.isActive
+                          ? `Completa el bloque #${calibrationTour.currentIndex + 1} (${getStrategyDescriptor(calibrationTour.sequence[calibrationTour.currentIndex]).shortName}) y responde la encuesta rápida de fatiga al terminar tu descanso para comparar tu rendimiento.`
+                          : 'Asigna automáticamente un método distinto por sesión, mide págs/min, densidad de apuntes y nivel de fatiga (1–5) para descubrir tu sistema ganador.'}
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[10px] text-left">
+                            <thead>
+                              <tr className="text-slate-400 border-b border-slate-800">
+                                <th className="py-1 pr-2">Método</th>
+                                <th className="py-1 px-1.5">Págs/min</th>
+                                <th className="py-1 px-1.5">Notas/h</th>
+                                <th className="py-1 px-1.5">Fatiga</th>
+                                <th className="py-1 pl-1.5 text-right">Score</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/70">
+                              {calibrationTour.sessions.map((metric) => {
+                                const score = computeCalibrationCompositeScore(
+                                  metric,
+                                  calibrationTour.sessions
+                                );
+                                const isWinner =
+                                  calibrationTour.recommendedWinner === metric.strategyId;
+                                return (
+                                  <tr
+                                    key={metric.id}
+                                    className={isWinner ? 'text-emerald-300 font-semibold' : 'text-slate-300'}
+                                  >
+                                    <td className="py-1.5 pr-2 truncate max-w-[95px]">
+                                      {metric.strategyName}
+                                    </td>
+                                    <td className="py-1.5 px-1.5 font-mono">
+                                      {metric.effectivePagesPerMin}
+                                    </td>
+                                    <td className="py-1.5 px-1.5 font-mono">
+                                      {metric.synthesisPerHour}
+                                    </td>
+                                    <td className="py-1.5 px-1.5 font-mono">
+                                      {metric.fatigueRating}/5
+                                    </td>
+                                    <td className="py-1.5 pl-1.5 text-right font-mono">
+                                      {score}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {calibrationTour.recommendedWinner && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleSelectStrategy(calibrationTour.recommendedWinner!)
+                            }
+                            className="w-full py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[11px] flex items-center justify-center gap-1.5"
+                          >
+                            <Award className="w-3.5 h-3.5" />
+                            <span>
+                              Fijar ganador:{' '}
+                              {getStrategyDescriptor(calibrationTour.recommendedWinner).name}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between pt-1 text-[11px] text-slate-400 border-t border-slate-800/80">
                   <span className="truncate">
                     {diagnosticSummary.stats.sampleCount > 0
                       ? `Calibrado: ${diagnosticSummary.recommendedSettings.speedMinPerPage} min/pág`
-                      : '¿No sabes qué ritmo usar?'}
+                      : '¿Qué estrategia se adapta mejor a ti?'}
                   </span>
                   <button
                     type="button"
-                    onClick={
-                      diagnosticSummary.stats.sampleCount > 0
-                        ? onOpenDiagnosticModal
-                        : onStartDiagnosticInViewer
-                    }
+                    onClick={onOpenDiagnosticModal}
                     className="text-emerald-300 hover:text-emerald-200 font-medium flex items-center gap-1 flex-shrink-0"
                   >
                     <Activity className="w-3 h-3" />
-                    <span>
-                      {diagnosticSummary.stats.sampleCount > 0
-                        ? 'Ver diagnóstico'
-                        : 'Medir mi ritmo'}
-                    </span>
+                    <span>Diagnóstico y Sugerencia</span>
                   </button>
                 </div>
               </div>
@@ -1385,6 +1641,21 @@ export const PomodoroAndPlanner: React.FC<PomodoroAndPlannerProps> = ({
                                 {doc.pageCount}p
                               </span>
                             </label>
+
+                            {onUpdateDocDeadline && (
+                              <input
+                                type="date"
+                                value={doc.deadline ? doc.deadline.slice(0, 10) : ''}
+                                onChange={(e) =>
+                                  void onUpdateDocDeadline(
+                                    doc.id,
+                                    e.target.value ? `${e.target.value}T23:59` : null
+                                  )
+                                }
+                                title="Fecha límite individual opcional (pondera Interleaving)"
+                                className="bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[10px] text-slate-300 font-mono focus:outline-none focus:border-indigo-500 hidden md:block"
+                              />
+                            )}
 
                             <div className="flex items-center gap-0.5 flex-shrink-0">
                               <button

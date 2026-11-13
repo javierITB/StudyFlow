@@ -401,6 +401,11 @@ export const RouteTimeline: React.FC<RouteTimelineProps> = ({
                                       {partLabel}
                                     </span>
                                   )}
+                                  {step.status === 'overdue' && (
+                                    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                      Desfasado
+                                    </span>
+                                  )}
                                   <span className="text-[10px] font-mono text-slate-400 ml-auto">
                                     {step.durationMinutes}m
                                   </span>

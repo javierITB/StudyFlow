@@ -7,8 +7,17 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { RouteSegment, RouteStep, StudySettings } from '../types/studyflow';
+import {
+  RouteSegment,
+  RouteStep,
+  StudySettings,
+  StudyStrategyId,
+} from '../types/studyflow';
 import { playStudyTone } from '../lib/audio';
+import {
+  computeFlowtimeBreakMinutes,
+  resolveActiveStrategyId,
+} from '../lib/studyMethods';
 
 export type TimerMode = 'study' | 'short' | 'long';
 
@@ -20,6 +29,21 @@ export interface TransitionPromptState {
   recommendedBreakMinutes: number;
 }
 
+export interface StrictOverduePromptState {
+  step: RouteStep;
+  currentPage: number;
+  targetEndPage: number;
+  remainingPages: number;
+  recommendedBreakMinutes: number;
+}
+
+export interface StudyBlockTelemetry {
+  strategyId: StudyStrategyId;
+  realStudySeconds: number;
+  breakSeconds: number;
+  step: RouteStep | null;
+}
+
 interface ActiveRouteContext {
   step: RouteStep;
   nextStep: RouteStep | null;
@@ -27,6 +51,8 @@ interface ActiveRouteContext {
 
 interface TimerContextValue {
   mode: TimerMode;
+  activeStrategy: StudyStrategyId;
+  isStopwatchActive: boolean;
   remainingSeconds: number;
   elapsedSeconds: number;
   totalDurationSeconds: number;
@@ -38,10 +64,12 @@ interface TimerContextValue {
   activeSegmentIndex: number;
   canExtendStudyFromBreak: boolean;
   transitionPrompt: TransitionPromptState | null;
+  strictOverduePrompt: StrictOverduePromptState | null;
   setMode: (mode: TimerMode, customMinutes?: number) => void;
   toggleTimer: () => void;
   resetTimer: () => void;
   skipCycle: () => void;
+  stopFlowtimeForFatigue: () => void;
   setTotalPlannedBlocks: (count: number) => void;
   startRouteStep: (
     step: RouteStep,
@@ -55,6 +83,9 @@ interface TimerContextValue {
   chooseStartBreak: (includeUnusedSeconds: boolean) => void;
   chooseSkipBreakToNextBlock: () => void;
   dismissTransitionPrompt: () => void;
+  resolveStrictOverdueWithBreak: () => void;
+  resolveStrictOverdueWithExtraTime: (extraMinutes?: number) => void;
+  dismissStrictOverduePrompt: () => void;
   adjustTimerSeconds: (deltaSeconds: number) => void;
   extendStudyAndAdaptPlan: (extraMinutes?: number) => void;
   skipBreakAndContinue: () => void;
@@ -65,8 +96,12 @@ const TimerContext = createContext<TimerContextValue | null>(null);
 interface TimerProviderProps {
   settings: StudySettings;
   plannedSteps?: RouteStep[];
+  getDocCurrentPage?: (docId: string) => number;
   onNotify: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
   onStepCompleted?: (stepId: string, docId: string | null, endPage?: number) => void;
+  onStrictBlockOverdue?: (step: RouteStep, reachedPage: number) => void;
+  onBreakCompleted?: (telemetry: StudyBlockTelemetry) => void;
+  onFlowtimeCompleted?: (realStudySeconds: number, docId: string | null) => void;
   onStepReopenedAndAdapted?: (
     step: RouteStep | null,
     extraMinutes: number
@@ -78,8 +113,12 @@ interface TimerProviderProps {
 export const TimerProvider: React.FC<TimerProviderProps> = ({
   settings,
   plannedSteps = [],
+  getDocCurrentPage,
   onNotify,
   onStepCompleted,
+  onStrictBlockOverdue,
+  onBreakCompleted,
+  onFlowtimeCompleted,
   onStepReopenedAndAdapted,
   onRequestOpenSegment,
   children,
@@ -101,13 +140,23 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
   const [transitionPrompt, setTransitionPrompt] = useState<TransitionPromptState | null>(
     null
   );
+  const [strictOverduePrompt, setStrictOverduePrompt] =
+    useState<StrictOverduePromptState | null>(null);
   const [lastCompletedStudyStep, setLastCompletedStudyStep] = useState<RouteStep | null>(
     null
   );
   const [accumulatedExtraMinutes, setAccumulatedExtraMinutes] = useState<number>(0);
 
+  const activeStrategy = resolveActiveStrategyId(settings);
+  const isStopwatchActive =
+    mode === 'study' &&
+    (settings.intervalMode === 'pages' || activeStrategy === 'flowtime');
+
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+
+  const activeStrategyRef = useRef(activeStrategy);
+  activeStrategyRef.current = activeStrategy;
 
   const activeRouteRef = useRef(activeRoute);
   activeRouteRef.current = activeRoute;
@@ -121,11 +170,36 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
   const remainingRef = useRef(remainingSeconds);
   remainingRef.current = remainingSeconds;
 
+  const elapsedRef = useRef(elapsedSeconds);
+  elapsedRef.current = elapsedSeconds;
+
+  const totalDurationRef = useRef(totalDurationSeconds);
+  totalDurationRef.current = totalDurationSeconds;
+
+  const lastStudyTelemetryRef = useRef<{
+    strategyId: StudyStrategyId;
+    realStudySeconds: number;
+    breakSeconds: number;
+    step: RouteStep | null;
+  } | null>(null);
+
   const plannedStepsRef = useRef(plannedSteps);
   plannedStepsRef.current = plannedSteps;
 
+  const getDocCurrentPageRef = useRef(getDocCurrentPage);
+  getDocCurrentPageRef.current = getDocCurrentPage;
+
   const onStepCompletedRef = useRef(onStepCompleted);
   onStepCompletedRef.current = onStepCompleted;
+
+  const onStrictBlockOverdueRef = useRef(onStrictBlockOverdue);
+  onStrictBlockOverdueRef.current = onStrictBlockOverdue;
+
+  const onBreakCompletedRef = useRef(onBreakCompleted);
+  onBreakCompletedRef.current = onBreakCompleted;
+
+  const onFlowtimeCompletedRef = useRef(onFlowtimeCompleted);
+  onFlowtimeCompletedRef.current = onFlowtimeCompleted;
 
   const onStepReopenedRef = useRef(onStepReopenedAndAdapted);
   onStepReopenedRef.current = onStepReopenedAndAdapted;
@@ -213,10 +287,26 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
       breakMode: 'short' | 'long',
       breakSeconds: number,
       allowExtendBack: boolean,
-      completedStep: RouteStep | null
+      completedStep: RouteStep | null,
+      recordedStudySeconds?: number
     ) => {
       const dur = Math.max(30, Math.round(breakSeconds));
+      const realStudySecs =
+        recordedStudySeconds !== undefined
+          ? recordedStudySeconds
+          : activeStrategyRef.current === 'flowtime'
+            ? elapsedRef.current
+            : Math.max(1, totalDurationRef.current - remainingRef.current);
+
+      lastStudyTelemetryRef.current = {
+        strategyId: activeStrategyRef.current,
+        realStudySeconds: realStudySecs,
+        breakSeconds: dur,
+        step: completedStep || activeRouteRef.current?.step || null,
+      };
+
       setTransitionPrompt(null);
+      setStrictOverduePrompt(null);
       setLastCompletedStudyStep(completedStep);
       setCanExtendStudyFromBreak(allowExtendBack);
       setModeState(breakMode);
@@ -229,7 +319,7 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
   );
 
   const commitStudyCompletionAndStartBreak = useCallback(
-    (extraBreakSeconds = 0, allowExtendBack = true) => {
+    (extraBreakSeconds = 0, allowExtendBack = true, recordedStudySecs?: number) => {
       const s = settingsRef.current;
       const routeCtx = activeRouteRef.current;
       const nextCycles = cyclesRef.current + 1;
@@ -249,7 +339,13 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
       const { breakMode, breakMinutes } = resolveBreakPlan(nextCycles);
       const totalBreakSecs = breakMinutes * 60 + Math.max(0, extraBreakSeconds);
 
-      launchBreakTimer(breakMode, totalBreakSecs, allowExtendBack, completedStep);
+      launchBreakTimer(
+        breakMode,
+        totalBreakSecs,
+        allowExtendBack,
+        completedStep,
+        recordedStudySecs
+      );
 
       const totalBreakMinLabel = Math.round(totalBreakSecs / 60);
       onNotifyRef.current(
@@ -259,6 +355,46 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
     },
     [resolveBreakPlan, launchBreakTimer]
   );
+
+  const stopFlowtimeForFatigue = useCallback(() => {
+    const studiedSeconds = Math.max(1, elapsedRef.current);
+    const s = settingsRef.current;
+    const routeCtx = activeRouteRef.current;
+    const breakMinutes = computeFlowtimeBreakMinutes(studiedSeconds);
+    const nextCycles = cyclesRef.current + 1;
+
+    setCyclesCompleted(nextCycles);
+    playStudyTone('success', s.audioEnabled);
+
+    let completedStep: RouteStep | null = null;
+    if (routeCtx?.step && routeCtx.step.type === 'study') {
+      completedStep = routeCtx.step;
+      onStepCompletedRef.current?.(
+        routeCtx.step.id,
+        routeCtx.step.docId,
+        routeCtx.step.endPage
+      );
+    }
+
+    onFlowtimeCompletedRef.current?.(
+      studiedSeconds,
+      routeCtx?.step?.docId || null
+    );
+
+    launchBreakTimer(
+      breakMinutes >= 15 ? 'long' : 'short',
+      breakMinutes * 60,
+      false,
+      completedStep,
+      studiedSeconds
+    );
+
+    const minsStudied = Math.max(1, Math.round(studiedSeconds / 60));
+    onNotifyRef.current(
+      `Flowtime pausado (${minsStudied} min efectivos). Descanso proporcional de ${breakMinutes} min iniciado.`,
+      'success'
+    );
+  }, [launchBreakTimer]);
 
   const advanceToNextRouteStep = useCallback(
     (completedStep: RouteStep | null, autoStart: boolean) => {
@@ -292,6 +428,7 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
         setAccumulatedExtraMinutes(0);
         setCanExtendStudyFromBreak(false);
         setTransitionPrompt(null);
+        setStrictOverduePrompt(null);
         setModeState('study');
         const dur = Math.max(60, nextStudy.durationMinutes * 60);
         setTotalDurationSeconds(dur);
@@ -318,6 +455,7 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
       setActiveRoute(null);
       setCanExtendStudyFromBreak(false);
       setTransitionPrompt(null);
+      setStrictOverduePrompt(null);
       setModeState('study');
       const dur = Math.max(60, s.studyMinutes * 60);
       setTotalDurationSeconds(dur);
@@ -332,25 +470,69 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
     []
   );
 
+  const emitBreakCompletionTelemetry = useCallback(() => {
+    const telemetry = lastStudyTelemetryRef.current;
+    if (telemetry) {
+      lastStudyTelemetryRef.current = null;
+      onBreakCompletedRef.current?.(telemetry);
+    }
+  }, []);
+
   const handleCountdownZero = useCallback(() => {
     const s = settingsRef.current;
+    const strategy = activeStrategyRef.current;
     if (modeRef.current === 'study') {
-      commitStudyCompletionAndStartBreak(0, true);
+      const routeStep = activeRouteRef.current?.step;
+      if (strategy === 'strict_timeboxing' && routeStep && routeStep.docId) {
+        const targetEnd =
+          routeStep.endPage ||
+          routeStep.segments?.[routeStep.segments.length - 1]?.endPage ||
+          0;
+        const currentPage = getDocCurrentPageRef.current
+          ? getDocCurrentPageRef.current(routeStep.docId)
+          : targetEnd;
+
+        if (targetEnd > 0 && currentPage < targetEnd) {
+          const remainingPages = targetEnd - currentPage;
+          const { breakMinutes } = resolveBreakPlan(cyclesRef.current + 1);
+          setIsRunning(false);
+          playStudyTone('breakEnd', s.audioEnabled);
+          onStrictBlockOverdueRef.current?.(routeStep, currentPage);
+          setStrictOverduePrompt({
+            step: routeStep,
+            currentPage,
+            targetEndPage: targetEnd,
+            remainingPages,
+            recommendedBreakMinutes: breakMinutes,
+          });
+          onNotifyRef.current(
+            `Bloque desfasado: faltaron ${remainingPages} págs. Redistribuidas en los próximos bloques.`,
+            'warning'
+          );
+          return;
+        }
+      }
+
+      commitStudyCompletionAndStartBreak(0, true, totalDurationRef.current);
     } else {
       playStudyTone('breakEnd', s.audioEnabled);
       onNotifyRef.current('Descanso finalizado. Listo para continuar.', 'info');
+      emitBreakCompletionTelemetry();
       advanceToNextRouteStep(lastCompletedStudyStep, false);
     }
-  }, [commitStudyCompletionAndStartBreak, lastCompletedStudyStep, advanceToNextRouteStep]);
+  }, [
+    commitStudyCompletionAndStartBreak,
+    lastCompletedStudyStep,
+    advanceToNextRouteStep,
+    resolveBreakPlan,
+    emitBreakCompletionTelemetry,
+  ]);
 
   useEffect(() => {
     if (!isRunning) return;
 
-    const isStopwatchMode =
-      mode === 'study' && settings.intervalMode === 'pages';
-
     const interval = window.setInterval(() => {
-      if (isStopwatchMode) {
+      if (isStopwatchActive) {
         setElapsedSeconds((prev) => prev + 1);
       } else {
         setRemainingSeconds((prev) => {
@@ -365,7 +547,7 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [isRunning, mode, settings.intervalMode, handleCountdownZero]);
+  }, [isRunning, isStopwatchActive, handleCountdownZero]);
 
   const toggleTimer = useCallback(() => {
     setIsRunning((prev) => {
@@ -379,6 +561,7 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
   const resetTimer = useCallback(() => {
     setIsRunning(false);
     setTransitionPrompt(null);
+    setStrictOverduePrompt(null);
     setElapsedSeconds(0);
     setRemainingSeconds(totalDurationSeconds);
     onNotifyRef.current('Temporizador reiniciado', 'info');
@@ -387,13 +570,34 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
   const skipCycle = useCallback(() => {
     setIsRunning(false);
     setTransitionPrompt(null);
+    setStrictOverduePrompt(null);
     if (mode === 'study') {
+      if (activeStrategyRef.current === 'flowtime') {
+        stopFlowtimeForFatigue();
+        return;
+      }
       const { breakMode, breakMinutes } = resolveBreakPlan(cyclesRef.current + 1);
-      launchBreakTimer(breakMode, breakMinutes * 60, false, activeRouteRef.current?.step ?? null);
+      const elapsedStudy = Math.max(60, totalDurationRef.current - remainingRef.current);
+      launchBreakTimer(
+        breakMode,
+        breakMinutes * 60,
+        false,
+        activeRouteRef.current?.step ?? null,
+        elapsedStudy
+      );
     } else {
+      emitBreakCompletionTelemetry();
       advanceToNextRouteStep(lastCompletedStudyStep, false);
     }
-  }, [mode, resolveBreakPlan, launchBreakTimer, advanceToNextRouteStep, lastCompletedStudyStep]);
+  }, [
+    mode,
+    resolveBreakPlan,
+    launchBreakTimer,
+    advanceToNextRouteStep,
+    lastCompletedStudyStep,
+    stopFlowtimeForFatigue,
+    emitBreakCompletionTelemetry,
+  ]);
 
   const startRouteStep = useCallback(
     (step: RouteStep, nextStep: RouteStep | null = null, segmentIndex = 0) => {
@@ -544,6 +748,40 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
     setTransitionPrompt(null);
   }, []);
 
+  const resolveStrictOverdueWithBreak = useCallback(() => {
+    if (!strictOverduePrompt) return;
+    const { step, recommendedBreakMinutes } = strictOverduePrompt;
+    setStrictOverduePrompt(null);
+    launchBreakTimer(
+      'short',
+      recommendedBreakMinutes * 60,
+      false,
+      step,
+      totalDurationRef.current
+    );
+  }, [strictOverduePrompt, launchBreakTimer]);
+
+  const resolveStrictOverdueWithExtraTime = useCallback(
+    (extraMinutes = 5) => {
+      if (!strictOverduePrompt) return;
+      const { step } = strictOverduePrompt;
+      setStrictOverduePrompt(null);
+      setModeState('study');
+      const dur = Math.max(60, extraMinutes * 60);
+      setTotalDurationSeconds(dur);
+      setRemainingSeconds(dur);
+      setElapsedSeconds(0);
+      setIsRunning(true);
+      playStudyTone('tick', settingsRef.current.audioEnabled);
+      onStepReopenedRef.current?.(step, extraMinutes);
+    },
+    [strictOverduePrompt]
+  );
+
+  const dismissStrictOverduePrompt = useCallback(() => {
+    setStrictOverduePrompt(null);
+  }, []);
+
   const adjustTimerSeconds = useCallback((deltaSeconds: number) => {
     setRemainingSeconds((prev) => {
       const next = Math.max(30, prev + deltaSeconds);
@@ -561,6 +799,7 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
       setCyclesCompleted((prev) => Math.max(0, prev - 1));
       setCanExtendStudyFromBreak(false);
       setTransitionPrompt(null);
+      setStrictOverduePrompt(null);
       setModeState('study');
       const dur = Math.max(60, extraMinutes * 60);
       setTotalDurationSeconds(dur);
@@ -577,12 +816,15 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
   const skipBreakAndContinue = useCallback(() => {
     const s = settingsRef.current;
     playStudyTone('breakEnd', s.audioEnabled);
+    emitBreakCompletionTelemetry();
     advanceToNextRouteStep(lastCompletedStudyStep, true);
-  }, [lastCompletedStudyStep, advanceToNextRouteStep]);
+  }, [lastCompletedStudyStep, advanceToNextRouteStep, emitBreakCompletionTelemetry]);
 
   const value = useMemo<TimerContextValue>(
     () => ({
       mode,
+      activeStrategy,
+      isStopwatchActive,
       remainingSeconds,
       elapsedSeconds,
       totalDurationSeconds,
@@ -594,10 +836,12 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
       activeSegmentIndex,
       canExtendStudyFromBreak,
       transitionPrompt,
+      strictOverduePrompt,
       setMode,
       toggleTimer,
       resetTimer,
       skipCycle,
+      stopFlowtimeForFatigue,
       setTotalPlannedBlocks,
       startRouteStep,
       setActiveSegmentIndex,
@@ -607,12 +851,17 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
       chooseStartBreak,
       chooseSkipBreakToNextBlock,
       dismissTransitionPrompt,
+      resolveStrictOverdueWithBreak,
+      resolveStrictOverdueWithExtraTime,
+      dismissStrictOverduePrompt,
       adjustTimerSeconds,
       extendStudyAndAdaptPlan,
       skipBreakAndContinue,
     }),
     [
       mode,
+      activeStrategy,
+      isStopwatchActive,
       remainingSeconds,
       elapsedSeconds,
       totalDurationSeconds,
@@ -623,10 +872,12 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
       activeSegmentIndex,
       canExtendStudyFromBreak,
       transitionPrompt,
+      strictOverduePrompt,
       setMode,
       toggleTimer,
       resetTimer,
       skipCycle,
+      stopFlowtimeForFatigue,
       startRouteStep,
       completeCurrentBlock,
       completeCurrentSegment,
@@ -634,6 +885,9 @@ export const TimerProvider: React.FC<TimerProviderProps> = ({
       chooseStartBreak,
       chooseSkipBreakToNextBlock,
       dismissTransitionPrompt,
+      resolveStrictOverdueWithBreak,
+      resolveStrictOverdueWithExtraTime,
+      dismissStrictOverduePrompt,
       adjustTimerSeconds,
       extendStudyAndAdaptPlan,
       skipBreakAndContinue,

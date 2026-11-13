@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import {
   Activity,
+  Brain,
   CheckCircle2,
+  FlaskConical,
   Gauge,
   RotateCcw,
   Sparkles,
@@ -12,10 +14,14 @@ import {
   DiagnosticCriterion,
   DiagnosticRecommendation,
   DocumentRecord,
+  LearnerProfile,
   PageReadingSample,
+  StrategyMatchSuggestion,
+  StudyStrategyId,
 } from '../types/studyflow';
 import {
-  computeRecommendedPomodoro,
+  DEFAULT_LEARNER_PROFILE,
+  computeAdaptiveStrategyRecommendation,
   formatDurationCompact,
 } from '../lib/diagnosticEngine';
 
@@ -23,29 +29,42 @@ interface DiagnosticModalProps {
   open: boolean;
   isActive: boolean;
   activeDoc: DocumentRecord | null;
+  documents?: DocumentRecord[];
+  hoursUntilDeadline?: number;
   samples: PageReadingSample[];
   criterion: DiagnosticCriterion;
+  learnerProfile?: LearnerProfile;
   onClose: () => void;
   onToggleDiagnostic: (active: boolean) => void;
   onChangeCriterion: (criterion: DiagnosticCriterion) => void;
+  onChangeLearnerProfile?: (profile: LearnerProfile) => void;
   onRemoveSample: (docId: string, page: number) => void;
   onResetSamples: () => void;
   onApplyRecommendation: (rec: DiagnosticRecommendation) => void;
+  onApplyStrategyMatch?: (match: StrategyMatchSuggestion, rec: DiagnosticRecommendation) => void;
+  onStartCalibrationFromMatches?: (strategies: StudyStrategyId[]) => void;
 }
 
 export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
   open,
   isActive,
   activeDoc,
+  documents = [],
+  hoursUntilDeadline = 72,
   samples,
   criterion,
+  learnerProfile = DEFAULT_LEARNER_PROFILE,
   onClose,
   onToggleDiagnostic,
   onChangeCriterion,
+  onChangeLearnerProfile,
   onRemoveSample,
   onResetSamples,
   onApplyRecommendation,
+  onApplyStrategyMatch,
+  onStartCalibrationFromMatches,
 }) => {
+  const [modalTab, setModalTab] = useState<'profile' | 'samples'>('profile');
   const [scope, setScope] = useState<'all' | 'current'>('all');
 
   const scopedSamples = useMemo(() => {
@@ -56,17 +75,32 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
   }, [samples, scope, activeDoc]);
 
   const recommendation = useMemo(
-    () => computeRecommendedPomodoro(scopedSamples, criterion),
-    [scopedSamples, criterion]
+    () =>
+      computeAdaptiveStrategyRecommendation({
+        samples: scopedSamples,
+        criterion,
+        learnerProfile,
+        documents: documents.length > 0 ? documents : activeDoc ? [activeDoc] : [],
+        hoursUntilDeadline,
+      }),
+    [scopedSamples, criterion, learnerProfile, documents, activeDoc, hoursUntilDeadline]
   );
 
   if (!open) return null;
+
+  const updateProfileField = <K extends keyof LearnerProfile>(
+    key: K,
+    val: LearnerProfile[K]
+  ) => {
+    const next = { ...learnerProfile, [key]: val };
+    onChangeLearnerProfile?.(next);
+  };
 
   const confidenceBadge = (() => {
     switch (recommendation.confidence) {
       case 'insufficient':
         return {
-          text: 'Sin muestras',
+          text: 'Sin muestras previas',
           cls: 'bg-slate-800 text-slate-400 border-slate-700',
         };
       case 'preliminary':
@@ -100,9 +134,14 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
     }
   })();
 
+  const topMatches = recommendation.strategyMatches || [];
+  const totalPagesContext = (
+    documents.length > 0 ? documents : activeDoc ? [activeDoc] : []
+  ).reduce((sum, d) => sum + (d.pageCount || 0), 0);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm fade-in">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
         {/* Cabecera */}
         <div className="flex items-start justify-between border-b border-slate-800 pb-3 gap-3">
           <div className="flex items-center gap-2.5">
@@ -112,7 +151,7 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold text-white">
-                  Modo Diagnóstico de Lectura Real
+                  Diagnóstico Previo y Recomendador de Estrategia
                 </h3>
                 <span
                   className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${confidenceBadge.cls}`}
@@ -121,8 +160,8 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Mide tu tiempo activo por página (sin pausas AFK ni saltos rápidos) para
-                calibrar tu ciclo Pomodoro ideal
+                Cruza tu forma de concentrarte, tus plazos y el material cargado para
+                recomendar el método óptimo
               </p>
             </div>
           </div>
@@ -136,248 +175,537 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
           </button>
         </div>
 
-        {/* Estado de grabacion + Alcance */}
-        <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-          <div className="flex items-center gap-2">
-            <Activity
-              className={`w-4 h-4 ${
-                isActive ? 'text-emerald-400 animate-pulse' : 'text-slate-500'
-              }`}
-            />
-            <span className="text-slate-200 font-medium">
-              {isActive
-                ? 'Medición activa mientras lees en el visor'
-                : 'Medición pausada'}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {activeDoc && (
-              <div className="flex items-center bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => setScope('all')}
-                  className={`px-2 py-1 rounded-md font-medium ${
-                    scope === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400'
-                  }`}
-                >
-                  Todos ({samples.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScope('current')}
-                  className={`px-2 py-1 rounded-md font-medium ${
-                    scope === 'current' ? 'bg-slate-800 text-white' : 'text-slate-400'
-                  }`}
-                >
-                  Solo actual
-                </button>
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => onToggleDiagnostic(!isActive)}
-              className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
-                isActive
-                  ? 'bg-amber-600/20 border border-amber-500/40 text-amber-300 hover:bg-amber-600/30'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-              }`}
-            >
-              {isActive ? 'Pausar medición' : 'Activar medición'}
-            </button>
-          </div>
+        {/* Selector de pestaña */}
+        <div className="grid grid-cols-2 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+          <button
+            type="button"
+            onClick={() => setModalTab('profile')}
+            className={`py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+              modalTab === 'profile'
+                ? 'bg-indigo-600 text-white'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Brain className="w-3.5 h-3.5" />
+            <span>Perfil y Estrategia Sugerida</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setModalTab('samples')}
+            className={`py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+              modalTab === 'samples'
+                ? 'bg-indigo-600 text-white'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span>Muestras por Página ({samples.length})</span>
+          </button>
         </div>
 
-        {/* Selector de criterio matematico */}
-        <div className="space-y-1.5 text-xs">
-          <label className="block font-medium text-slate-300">
-            Fórmula de cálculo de velocidad y dificultad
-          </label>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
-            {(
-              [
-                {
-                  id: 'balanced',
-                  title: 'Equilibrado',
-                  desc: '65% Mediana + 35% P75',
-                },
-                {
-                  id: 'average',
-                  title: 'Tiempo Medio',
-                  desc: 'Promedio real directo',
-                },
-                {
-                  id: 'max',
-                  title: 'Conservador (Máx.)',
-                  desc: '40% P75 + 60% Máximo',
-                },
-              ] as const
-            ).map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => onChangeCriterion(opt.id)}
-                className={`p-2 rounded-lg text-left transition-colors ${
-                  criterion === opt.id
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-900'
-                }`}
-              >
-                <div className="font-semibold text-[11px]">{opt.title}</div>
-                <div
-                  className={`text-[10px] ${
-                    criterion === opt.id ? 'text-indigo-100' : 'text-slate-400'
-                  }`}
-                >
-                  {opt.desc}
+        {modalTab === 'profile' ? (
+          <div className="space-y-4">
+            {/* Resumen de contexto analizado */}
+            <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
+              <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
+                <div className="text-slate-400">Material cargado</div>
+                <div className="font-mono font-bold text-white mt-0.5">
+                  {documents.length || (activeDoc ? 1 : 0)} arch · {totalPagesContext} págs
                 </div>
-              </button>
-            ))}
-          </div>
-        </div>
+              </div>
+              <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
+                <div className="text-slate-400">Margen disponible</div>
+                <div className="font-mono font-bold text-indigo-300 mt-0.5">
+                  {hoursUntilDeadline > 0
+                    ? `${Math.round(hoursUntilDeadline)}h disponibles`
+                    : 'Sin fecha límite'}
+                </div>
+              </div>
+              <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
+                <div className="text-slate-400">Ritmo medido</div>
+                <div className="font-mono font-bold text-emerald-300 mt-0.5">
+                  {recommendation.recommendedSettings.speedMinPerPage} min/pág
+                </div>
+              </div>
+            </div>
 
-        {/* Diagnostico y Estadisticas */}
-        <div className={`p-4 rounded-xl border space-y-3 ${difficultyAccent}`}>
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4" />
-              {recommendation.difficultyLabel}
-            </span>
-            <span className="font-mono text-xs font-semibold">
-              Ritmo base: {recommendation.recommendedSettings.speedMinPerPage} min/pág
-            </span>
-          </div>
-          <p className="text-xs opacity-90 leading-relaxed">{recommendation.rationale}</p>
+            {/* Cuestionario rápido de 4 ejes sobre forma de ser y estudio */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <label className="font-semibold text-slate-200 block">
+                  1. ¿Cómo fluye mejor tu concentración?
+                </label>
+                <div className="space-y-1">
+                  {(
+                    [
+                      {
+                        id: 'short_bursts',
+                        label: 'Bloques cortos constantes',
+                        sub: 'Me cuesta arrancar o me saturo rápido',
+                      },
+                      {
+                        id: 'flow_uninterrupted',
+                        label: 'Sin alarmas de corte (Flujo)',
+                        sub: 'Si me interrumpe un reloj pierdo el hilo',
+                      },
+                      {
+                        id: 'deep_immersion',
+                        label: 'Inmersión prolongada (50–90m)',
+                        sub: 'Prefiero sesiones largas y descansos amplios',
+                      },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => updateProfileField('focusPattern', opt.id)}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg border transition-colors ${
+                        learnerProfile.focusPattern === opt.id
+                          ? 'bg-indigo-600/20 border-indigo-500 text-white'
+                          : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="font-semibold text-[11px]">{opt.label}</div>
+                      <div className="text-[10px] text-slate-400">{opt.sub}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          <div className="grid grid-cols-4 gap-2 pt-1 text-center">
-            <div className="p-2 rounded-lg bg-slate-950/60 border border-black/20">
-              <div className="text-[10px] text-slate-400">Mínimo</div>
-              <div className="text-xs font-mono font-bold text-white mt-0.5">
-                {formatDurationCompact(recommendation.stats.minSeconds)}
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <label className="font-semibold text-slate-200 block">
+                  2. ¿Cuál es tu prioridad con este texto?
+                </label>
+                <div className="space-y-1">
+                  {(
+                    [
+                      {
+                        id: 'comprehension',
+                        label: 'Comprender conceptos complejos',
+                        sub: 'Asimilar capítulos densos desde cero',
+                      },
+                      {
+                        id: 'retention',
+                        label: 'Memorizar fórmulas o datos',
+                        sub: 'Evocar sin mirar y repaso espaciado',
+                      },
+                      {
+                        id: 'volume_deadline',
+                        label: 'Cumplir cuota contra fecha límite',
+                        sub: 'Avanzar muchas páginas sin quedarme atrás',
+                      },
+                      {
+                        id: 'multi_subject',
+                        label: 'Alternar varios ramos/archivos',
+                        sub: 'Evitar monotonía estudiando un solo texto',
+                      },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => updateProfileField('primaryGoal', opt.id)}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg border transition-colors ${
+                        learnerProfile.primaryGoal === opt.id
+                          ? 'bg-indigo-600/20 border-indigo-500 text-white'
+                          : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="font-semibold text-[11px]">{opt.label}</div>
+                      <div className="text-[10px] text-slate-400">{opt.sub}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="p-2 rounded-lg bg-slate-950/60 border border-black/20">
-              <div className="text-[10px] text-slate-400">Mediana</div>
-              <div className="text-xs font-mono font-bold text-white mt-0.5">
-                {formatDurationCompact(recommendation.stats.medianSeconds)}
-              </div>
-            </div>
-            <div className="p-2 rounded-lg bg-slate-950/60 border border-black/20">
-              <div className="text-[10px] text-slate-400">Promedio</div>
-              <div className="text-xs font-mono font-bold text-white mt-0.5">
-                {formatDurationCompact(recommendation.stats.meanSeconds)}
-              </div>
-            </div>
-            <div className="p-2 rounded-lg bg-slate-950/60 border border-black/20">
-              <div className="text-[10px] text-slate-400">Máximo</div>
-              <div className="text-xs font-mono font-bold text-white mt-0.5">
-                {formatDurationCompact(recommendation.stats.maxSeconds)}
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Tarjeta del Perfil Pomodoro Recomendado */}
-        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-          <div className="text-xs font-bold uppercase tracking-wider text-slate-300">
-            Perfil Pomodoro Recomendado
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
-            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-              <div className="text-[10px] text-slate-400">Estudio</div>
-              <div className="text-base font-bold font-mono text-indigo-400 mt-0.5">
-                {recommendation.recommendedSettings.studyMinutes}m
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <label className="font-semibold text-slate-200 block">
+                  3. ¿Cómo te llevas con las metas por reloj?
+                </label>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {(
+                    [
+                      {
+                        id: 'strict_goals',
+                        label: 'Me ordenan las sub-metas estrictas',
+                        sub: 'Quiero saber exactamente en qué página ir',
+                      },
+                      {
+                        id: 'flexible_pace',
+                        label: 'Prefiero ritmo flexible',
+                        sub: 'Ajustar descansos según mi fatiga real',
+                      },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => updateProfileField('timePressureTolerance', opt.id)}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg border transition-colors ${
+                        learnerProfile.timePressureTolerance === opt.id
+                          ? 'bg-indigo-600/20 border-indigo-500 text-white'
+                          : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="font-semibold text-[11px]">{opt.label}</div>
+                      <div className="text-[10px] text-slate-400">{opt.sub}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-              <div className="text-[10px] text-slate-400">Desc. Corto</div>
-              <div className="text-base font-bold font-mono text-sky-400 mt-0.5">
-                {recommendation.recommendedSettings.shortBreakMinutes}m
-              </div>
-            </div>
-            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-              <div className="text-[10px] text-slate-400">Desc. Largo</div>
-              <div className="text-base font-bold font-mono text-purple-400 mt-0.5">
-                {recommendation.recommendedSettings.longBreakMinutes}m
-              </div>
-            </div>
-            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-              <div className="text-[10px] text-slate-400">Velocidad</div>
-              <div className="text-base font-bold font-mono text-emerald-400 mt-0.5">
-                {recommendation.recommendedSettings.speedMinPerPage}m/p
-              </div>
-            </div>
-            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 col-span-2 sm:col-span-1">
-              <div className="text-[10px] text-slate-400">Meta Págs</div>
-              <div className="text-base font-bold font-mono text-white mt-0.5">
-                {recommendation.recommendedSettings.pagesPerBlock}p
-              </div>
-            </div>
-          </div>
-          <p className="text-[11px] text-slate-400">
-            Descanso largo cada{' '}
-            <strong className="text-slate-200">
-              {recommendation.recommendedSettings.longBreakEveryNBlocks} bloques
-            </strong>{' '}
-            internos y al cambiar entre documentos.
-          </p>
-        </div>
 
-        {/* Muestras capturadas por pagina */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-300">
-              Páginas medidas ({scopedSamples.length})
-            </span>
-            {samples.length > 0 && (
-              <button
-                type="button"
-                onClick={onResetSamples}
-                className="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reiniciar muestras</span>
-              </button>
-            )}
-          </div>
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <label className="font-semibold text-slate-200 block">
+                  4. ¿Cómo prefieres sintetizar y repasar?
+                </label>
+                <div className="space-y-1">
+                  {(
+                    [
+                      {
+                        id: 'active_recall',
+                        label: 'Active Recall + Oclusión FSRS',
+                        sub: 'Tapar texto/fórmulas y autoevaluarme',
+                      },
+                      {
+                        id: 'structured_cornell',
+                        label: 'Apuntes Cornell estructurados',
+                        sub: 'Claves, desarrollo y resumen exportable',
+                      },
+                      {
+                        id: 'guided_sq3r',
+                        label: 'Lectura guiada paso a paso (SQ3R)',
+                        sub: 'Explorar, formular preguntas y recitar',
+                      },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => updateProfileField('reviewPreference', opt.id)}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg border transition-colors ${
+                        learnerProfile.reviewPreference === opt.id
+                          ? 'bg-indigo-600/20 border-indigo-500 text-white'
+                          : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="font-semibold text-[11px]">{opt.label}</div>
+                      <div className="text-[10px] text-slate-400">{opt.sub}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
 
-          <div className="max-h-36 overflow-y-auto space-y-1.5 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-            {scopedSamples.length === 0 ? (
-              <p className="text-[11px] text-slate-400 text-center py-3">
-                Aún no hay muestras registradas. Activa el diagnóstico y lee al menos 3
-                segundos por página.
-              </p>
-            ) : (
-              scopedSamples.map((s) => (
-                <div
-                  key={`${s.docId}_${s.page}`}
-                  className="flex items-center justify-between text-xs px-2 py-1 rounded-lg bg-slate-900 border border-slate-800/80"
-                >
-                  <div className="min-w-0 truncate flex-1">
-                    <span className="text-slate-200 font-medium">{s.docName}</span>
-                    <span className="text-slate-400 font-mono ml-2">
-                      {s.fileType === 'pptx' ? 'Slide' : 'Pág.'} {s.page}
-                    </span>
+            {/* Ranking Top 3 de Sistemas Recomendados */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Sistemas Recomendados para Ti
+                </h4>
+                {onStartCalibrationFromMatches && topMatches.length >= 2 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onStartCalibrationFromMatches(topMatches.map((m) => m.strategyId))
+                    }
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-[11px] font-semibold text-emerald-300 flex items-center gap-1.5 transition-colors"
+                  >
+                    <FlaskConical className="w-3.5 h-3.5" />
+                    <span>Probar estas {topMatches.length} en Calibración A/B</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {topMatches.map((match, idx) => (
+                  <div
+                    key={match.strategyId}
+                    className={`p-3 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                      idx === 0
+                        ? 'bg-indigo-500/10 border-indigo-400/60 shadow-md'
+                        : 'bg-slate-950 border-slate-800'
+                    }`}
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                            idx === 0
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          #{idx + 1} · {match.compatibilityScore}% afinidad
+                        </span>
+                        <span className="text-xs font-bold text-white">{match.title}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-sky-300">
+                          + {match.synthesisLabel}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        {match.whyItFits}
+                      </p>
+                    </div>
+
+                    {onApplyStrategyMatch && (
+                      <button
+                        type="button"
+                        onClick={() => onApplyStrategyMatch(match, recommendation)}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold flex-shrink-0 flex items-center gap-1.5 transition-colors ${
+                          idx === 0
+                            ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Usar este sistema</span>
+                      </button>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                    <span className="font-mono text-indigo-300">
-                      {formatDurationCompact(s.activeSeconds)}
-                    </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Estado de grabacion + Alcance */}
+            <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+              <div className="flex items-center gap-2">
+                <Activity
+                  className={`w-4 h-4 ${
+                    isActive ? 'text-emerald-400 animate-pulse' : 'text-slate-500'
+                  }`}
+                />
+                <span className="text-slate-200 font-medium">
+                  {isActive
+                    ? 'Medición activa mientras lees en el visor'
+                    : 'Medición pausada'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {activeDoc && (
+                  <div className="flex items-center bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[11px]">
                     <button
                       type="button"
-                      onClick={() => onRemoveSample(s.docId, s.page)}
-                      title="Descartar esta muestra"
-                      className="text-slate-500 hover:text-rose-400 p-0.5"
+                      onClick={() => setScope('all')}
+                      className={`px-2 py-1 rounded-md font-medium ${
+                        scope === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400'
+                      }`}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      Todos ({samples.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setScope('current')}
+                      className={`px-2 py-1 rounded-md font-medium ${
+                        scope === 'current' ? 'bg-slate-800 text-white' : 'text-slate-400'
+                      }`}
+                    >
+                      Solo actual
                     </button>
                   </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => onToggleDiagnostic(!isActive)}
+                  className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                    isActive
+                      ? 'bg-amber-600/20 border border-amber-500/40 text-amber-300 hover:bg-amber-600/30'
+                      : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                  }`}
+                >
+                  {isActive ? 'Pausar medición' : 'Activar medición'}
+                </button>
+              </div>
+            </div>
+
+            {/* Selector de criterio matematico */}
+            <div className="space-y-1.5 text-xs">
+              <label className="block font-medium text-slate-300">
+                Fórmula de cálculo de velocidad y dificultad
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                {(
+                  [
+                    {
+                      id: 'balanced',
+                      title: 'Equilibrado',
+                      desc: '65% Mediana + 35% P75',
+                    },
+                    {
+                      id: 'average',
+                      title: 'Tiempo Medio',
+                      desc: 'Promedio real directo',
+                    },
+                    {
+                      id: 'max',
+                      title: 'Conservador (Máx.)',
+                      desc: '40% P75 + 60% Máximo',
+                    },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onChangeCriterion(opt.id)}
+                    className={`p-2 rounded-lg text-left transition-colors ${
+                      criterion === opt.id
+                        ? 'bg-indigo-600 text-white'
+                        : 'text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    <div className="font-semibold text-[11px]">{opt.title}</div>
+                    <div
+                      className={`text-[10px] ${
+                        criterion === opt.id ? 'text-indigo-100' : 'text-slate-400'
+                      }`}
+                    >
+                      {opt.desc}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Diagnostico y Estadisticas */}
+            <div className={`p-4 rounded-xl border space-y-3 ${difficultyAccent}`}>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4" />
+                  {recommendation.difficultyLabel}
+                </span>
+                <span className="font-mono text-xs font-semibold">
+                  Ritmo base: {recommendation.recommendedSettings.speedMinPerPage} min/pág
+                </span>
+              </div>
+              <p className="text-xs opacity-90 leading-relaxed">{recommendation.rationale}</p>
+
+              <div className="grid grid-cols-4 gap-2 pt-1 text-center">
+                <div className="p-2 rounded-lg bg-slate-950/60 border border-black/20">
+                  <div className="text-[10px] text-slate-400">Mínimo</div>
+                  <div className="text-xs font-mono font-bold text-white mt-0.5">
+                    {formatDurationCompact(recommendation.stats.minSeconds)}
+                  </div>
                 </div>
-              ))
-            )}
+                <div className="p-2 rounded-lg bg-slate-950/60 border border-black/20">
+                  <div className="text-[10px] text-slate-400">Mediana</div>
+                  <div className="text-xs font-mono font-bold text-white mt-0.5">
+                    {formatDurationCompact(recommendation.stats.medianSeconds)}
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-950/60 border border-black/20">
+                  <div className="text-[10px] text-slate-400">Promedio</div>
+                  <div className="text-xs font-mono font-bold text-white mt-0.5">
+                    {formatDurationCompact(recommendation.stats.meanSeconds)}
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-950/60 border border-black/20">
+                  <div className="text-[10px] text-slate-400">Máximo</div>
+                  <div className="text-xs font-mono font-bold text-white mt-0.5">
+                    {formatDurationCompact(recommendation.stats.maxSeconds)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Tarjeta del Perfil Pomodoro Recomendado */}
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                Parámetros Base Calculados por Lectura
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                  <div className="text-[10px] text-slate-400">Estudio</div>
+                  <div className="text-base font-bold font-mono text-indigo-400 mt-0.5">
+                    {recommendation.recommendedSettings.studyMinutes}m
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                  <div className="text-[10px] text-slate-400">Desc. Corto</div>
+                  <div className="text-base font-bold font-mono text-sky-400 mt-0.5">
+                    {recommendation.recommendedSettings.shortBreakMinutes}m
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                  <div className="text-[10px] text-slate-400">Desc. Largo</div>
+                  <div className="text-base font-bold font-mono text-purple-400 mt-0.5">
+                    {recommendation.recommendedSettings.longBreakMinutes}m
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                  <div className="text-[10px] text-slate-400">Velocidad</div>
+                  <div className="text-base font-bold font-mono text-emerald-400 mt-0.5">
+                    {recommendation.recommendedSettings.speedMinPerPage}m/p
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 col-span-2 sm:col-span-1">
+                  <div className="text-[10px] text-slate-400">Meta Págs</div>
+                  <div className="text-base font-bold font-mono text-white mt-0.5">
+                    {recommendation.recommendedSettings.pagesPerBlock}p
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Muestras capturadas por pagina */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-slate-300">
+                  Páginas medidas ({scopedSamples.length})
+                </span>
+                {samples.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={onResetSamples}
+                    className="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Reiniciar muestras</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="max-h-36 overflow-y-auto space-y-1.5 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                {scopedSamples.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 text-center py-3">
+                    Aún no hay muestras registradas. Activa el diagnóstico y lee al menos 3
+                    segundos por página.
+                  </p>
+                ) : (
+                  scopedSamples.map((s) => (
+                    <div
+                      key={`${s.docId}_${s.page}`}
+                      className="flex items-center justify-between text-xs px-2 py-1 rounded-lg bg-slate-900 border border-slate-800/80"
+                    >
+                      <div className="min-w-0 truncate flex-1">
+                        <span className="text-slate-200 font-medium">{s.docName}</span>
+                        <span className="text-slate-400 font-mono ml-2">
+                          {s.fileType === 'pptx' ? 'Slide' : 'Pág.'} {s.page}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="font-mono text-indigo-300">
+                          {formatDurationCompact(s.activeSeconds)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onRemoveSample(s.docId, s.page)}
+                          title="Descartar esta muestra"
+                          className="text-slate-500 hover:text-rose-400 p-0.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Acciones finales */}
         <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-800">
@@ -388,18 +716,19 @@ export const DiagnosticModal: React.FC<DiagnosticModalProps> = ({
           >
             Seguir leyendo
           </button>
-          <button
-            type="button"
-            disabled={recommendation.stats.sampleCount === 0}
-            onClick={() => onApplyRecommendation(recommendation)}
-            className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:pointer-events-none text-xs font-semibold text-white flex items-center gap-1.5"
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>Aplicar Perfil Recomendado al Plan</span>
-          </button>
+          {modalTab === 'samples' && (
+            <button
+              type="button"
+              disabled={recommendation.stats.sampleCount === 0}
+              onClick={() => onApplyRecommendation(recommendation)}
+              className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:pointer-events-none text-xs font-semibold text-white flex items-center gap-1.5"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Aplicar Velocidad Medida</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 };
-

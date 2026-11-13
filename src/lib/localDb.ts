@@ -1,4 +1,5 @@
 import {
+  DocumentOcclusionRecord,
   DocumentRecord,
   FolderRecord,
   PersistedPlanState,
@@ -9,9 +10,15 @@ import {
 import { DEFAULT_STUDY_SETTINGS } from './studyMethods';
 
 const DB_NAME = 'StudyFlow_Persistent_DB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
-export type StoreName = 'folders' | 'documents' | 'notes' | 'tasks' | 'settings';
+export type StoreName =
+  | 'folders'
+  | 'documents'
+  | 'notes'
+  | 'occlusions'
+  | 'tasks'
+  | 'settings';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -44,6 +51,11 @@ export function openDatabase(): Promise<IDBDatabase> {
         const noteStore = db.createObjectStore('notes', { keyPath: 'id' });
         noteStore.createIndex('docId', 'docId', { unique: false });
         noteStore.createIndex('zone', 'zone', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains('occlusions')) {
+        const occStore = db.createObjectStore('occlusions', { keyPath: 'id' });
+        occStore.createIndex('docId', 'docId', { unique: false });
       }
 
       if (!db.objectStoreNames.contains('tasks')) {
@@ -136,18 +148,21 @@ export async function loadLocalSnapshot(): Promise<{
   folders: FolderRecord[];
   documents: DocumentRecord[];
   notes: StickyNoteRecord[];
+  occlusions: DocumentOcclusionRecord[];
   tasks: TaskRecord[];
   studySettings: StudySettings;
   planState: PersistedPlanState | null;
 }> {
-  const [folders, rawDocs, notes, tasks, storedSettings, planState] = await Promise.all([
-    dbGetAll<FolderRecord>('folders'),
-    dbGetAll<DocumentRecord>('documents'),
-    dbGetAll<StickyNoteRecord>('notes'),
-    dbGetAll<TaskRecord>('tasks'),
-    getSetting<StudySettings>('studySettings'),
-    getSetting<PersistedPlanState>('planState'),
-  ]);
+  const [folders, rawDocs, notes, occlusions, tasks, storedSettings, planState] =
+    await Promise.all([
+      dbGetAll<FolderRecord>('folders'),
+      dbGetAll<DocumentRecord>('documents'),
+      dbGetAll<StickyNoteRecord>('notes'),
+      dbGetAll<DocumentOcclusionRecord>('occlusions').catch(() => []),
+      dbGetAll<TaskRecord>('tasks'),
+      getSetting<StudySettings>('studySettings'),
+      getSetting<PersistedPlanState>('planState'),
+    ]);
 
   // Normalizar registros v1 (sin fileType o folderId)
   const documents: DocumentRecord[] = rawDocs.map((doc) => ({
@@ -162,6 +177,7 @@ export async function loadLocalSnapshot(): Promise<{
     folders,
     documents,
     notes,
+    occlusions,
     tasks,
     studySettings: {
       ...DEFAULT_STUDY_SETTINGS,
@@ -180,6 +196,7 @@ export async function clearAllLocalData(): Promise<void> {
     dbClearStore('folders'),
     dbClearStore('documents'),
     dbClearStore('notes'),
+    dbClearStore('occlusions'),
     dbClearStore('tasks'),
     dbClearStore('settings'),
   ]);

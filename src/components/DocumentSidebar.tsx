@@ -3,6 +3,7 @@ import {
   BookOpen,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   FileSpreadsheet,
   FileText,
@@ -27,6 +28,7 @@ import {
   FolderRecord,
   RouteStep,
   StudyPlanResult,
+  UserProfile,
 } from '../types/studyflow';
 import { FOLDER_COLOR_CLASSES, formatFileSize } from '../lib/documentUtils';
 import { RouteTimeline } from './RouteTimeline';
@@ -52,6 +54,8 @@ interface DocumentSidebarProps {
   onToggleStepCompleted: (stepId: string) => Promise<void>;
   onOpenPlannerTab: () => void;
   onCloseDrawer?: () => void;
+  user?: UserProfile | null;
+  onOpenAccountModal?: () => void;
 }
 
 const FOLDER_COLORS: FolderColor[] = [
@@ -92,6 +96,8 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   onToggleStepCompleted,
   onOpenPlannerTab,
   onCloseDrawer,
+  user = null,
+  onOpenAccountModal,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const uploadFolderTargetRef = useRef<string | null>(null);
@@ -345,17 +351,22 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   return (
     <aside className="w-full h-full sf-sidebar-chrome backdrop-blur-md flex flex-col overflow-hidden">
       {/* Cabecera superior de marca integrada (alineada con la altura del Navbar) */}
-      <div className="h-12 xl:h-14 sf-header-chrome border-b border-indigo-500/20 px-3 flex items-center justify-between gap-2 flex-shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-8 h-8 xl:w-9 xl:h-9 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 flex-shrink-0">
+      <div className="h-14 xl:h-16 sf-header-chrome border-b border-indigo-500/20 px-3.5 flex items-center justify-between gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 xl:w-9 xl:h-9 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 flex-shrink-0">
             <BookOpen className="w-4 h-4 xl:w-5 xl:h-5 text-white" />
           </div>
-          <span className="text-sm xl:text-base font-bold tracking-tight text-white flex items-center gap-1.5 whitespace-nowrap truncate">
-            <span>StudyFlow</span>
-            <span className="inline-flex text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
-              2.0
+          <div className="min-w-0 flex flex-col">
+            <span className="text-xs xl:text-sm font-bold tracking-tight text-white flex items-center gap-1.5 whitespace-nowrap truncate">
+              <span>StudyFlow</span>
+              <span className="inline-flex text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                2.0
+              </span>
             </span>
-          </span>
+            <span className="text-[9px] font-semibold uppercase tracking-widest text-slate-400 truncate">
+              Panel de Control
+            </span>
+          </div>
         </div>
         {onCloseDrawer && (
           <button
@@ -918,10 +929,53 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   </div>
 )}
 
-{/* Estado de almacenamiento */ }
-<div className="p-3 border-t border-indigo-500/25 bg-slate-900/90 flex items-center justify-between text-[11px] text-slate-400">
-  <span>Almacenamiento: IndexedDB</span>
-  <span className="text-indigo-300 font-medium">{syncStatusLabel}</span>
+{/* Footer estilo Solunex ACCIONA: Contraer panel + Perfil de Usuario + Almacenamiento */}
+<div className="border-t border-indigo-500/20 bg-slate-950/80 p-2.5 space-y-2 flex-shrink-0">
+  {onCloseDrawer && (
+    <button
+      type="button"
+      onClick={onCloseDrawer}
+      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent hover:border-slate-800 transition-colors"
+      title="Contraer menú lateral"
+    >
+      <ChevronLeft className="w-4 h-4 text-slate-400" />
+      <span>Contraer menú</span>
+    </button>
+  )}
+
+  <div
+    onClick={onOpenAccountModal}
+    role={onOpenAccountModal ? 'button' : undefined}
+    tabIndex={onOpenAccountModal ? 0 : undefined}
+    title={onOpenAccountModal ? 'Gestionar cuenta y sincronización' : undefined}
+    className={`flex items-center justify-between gap-2 p-2 rounded-xl bg-slate-900/90 border border-indigo-500/20 ${
+      onOpenAccountModal ? 'hover:border-indigo-400/50 hover:bg-slate-900 cursor-pointer transition-all' : ''
+    }`}
+  >
+    <div className="flex items-center gap-2.5 min-w-0">
+      <div className="w-8 h-8 rounded-xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-xs font-bold text-indigo-300 flex-shrink-0">
+        {user?.fullName?.charAt(0).toUpperCase() ||
+          user?.username?.charAt(0).toUpperCase() ||
+          'V'}
+      </div>
+      <div className="min-w-0 flex flex-col">
+        <span className="text-xs font-semibold text-white truncate leading-tight">
+          {user?.fullName || (user?.username ? `@${user.username}` : 'Vicente')}
+        </span>
+        <span className="text-[10px] font-medium text-indigo-400/90 uppercase tracking-wider truncate">
+          {user ? 'Estudiante' : syncStatusLabel}
+        </span>
+      </div>
+    </div>
+    {onOpenAccountModal && (
+      <Sliders className="w-3.5 h-3.5 text-slate-400 hover:text-white flex-shrink-0" />
+    )}
+  </div>
+
+  <div className="flex items-center justify-between px-1 text-[10px] text-slate-400">
+    <span>Almacenamiento: IndexedDB</span>
+    <span className="text-indigo-300 font-medium">{syncStatusLabel}</span>
+  </div>
 </div>
     </aside >
   );

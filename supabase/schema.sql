@@ -222,6 +222,7 @@ create table if not exists public.documents (
   page_count integer not null default 1,
   current_page integer not null default 1,
   storage_path text,
+  deadline timestamptz,
   upload_date timestamptz not null default now()
 );
 
@@ -576,6 +577,7 @@ create table if not exists public.notes (
   zone text not null default 'ideas',
   is_shared boolean not null default false,
   author_username text,
+  meta jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -638,6 +640,50 @@ create policy "Authors or doc owners delete notes"
     (select auth.uid()) = user_id
     or (doc_id is not null and is_shared = true and private.is_doc_owner(doc_id))
   );
+
+-- 5b. Oclusiones visuales sobre páginas de documentos (Active Recall + FSRS)
+create table if not exists public.document_occlusions (
+  id text primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  doc_id text not null references public.documents (id) on delete cascade,
+  page integer not null default 1,
+  x_ratio double precision not null,
+  y_ratio double precision not null,
+  width_ratio double precision not null,
+  height_ratio double precision not null,
+  label text,
+  meta jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists document_occlusions_user_doc_idx
+  on public.document_occlusions (user_id, doc_id);
+alter table public.document_occlusions enable row level security;
+
+drop policy if exists "Users view own or shared doc occlusions" on public.document_occlusions;
+create policy "Users view own or shared doc occlusions"
+  on public.document_occlusions for select
+  to authenticated
+  using ((select auth.uid()) = user_id or private.can_read_doc(doc_id));
+
+drop policy if exists "Users insert own or collaborative occlusions" on public.document_occlusions;
+create policy "Users insert own or collaborative occlusions"
+  on public.document_occlusions for insert
+  to authenticated
+  with check ((select auth.uid()) = user_id and private.can_collaborate_doc(doc_id));
+
+drop policy if exists "Users update own occlusions" on public.document_occlusions;
+create policy "Users update own occlusions"
+  on public.document_occlusions for update
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users delete own occlusions" on public.document_occlusions;
+create policy "Users delete own occlusions"
+  on public.document_occlusions for delete
+  to authenticated
+  using ((select auth.uid()) = user_id or private.is_doc_owner(doc_id));
 
 -- 6. Lista de tareas de estudio
 create table if not exists public.tasks (

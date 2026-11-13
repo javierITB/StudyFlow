@@ -1,10 +1,13 @@
 import {
+  DocumentOcclusionRecord,
   DocumentRecord,
   DocumentType,
   FolderColor,
   FolderRecord,
+  FsrsCardState,
   KanbanZone,
   NoteColor,
+  NoteFormat,
   PersistedPlanState,
   StickyNoteRecord,
   StudySettings,
@@ -21,6 +24,10 @@ function sanitizeFileName(name: string): string {
 }
 
 export function mapNoteRow(n: Record<string, unknown>): StickyNoteRecord {
+  const meta = (n.meta && typeof n.meta === 'object' ? n.meta : {}) as Record<
+    string,
+    unknown
+  >;
   return {
     id: String(n.id),
     docId: (n.doc_id as string | null) || null,
@@ -34,6 +41,35 @@ export function mapNoteRow(n: Record<string, unknown>): StickyNoteRecord {
     userId: (n.user_id as string | undefined) || undefined,
     authorUsername: (n.author_username as string | null) ?? null,
     isShared: Boolean(n.is_shared),
+    format: (meta.format as NoteFormat | undefined) || undefined,
+    cornellCues: (meta.cornellCues as string | undefined) || undefined,
+    cornellSummary: (meta.cornellSummary as string | undefined) || undefined,
+    isComplex: typeof meta.isComplex === 'boolean' ? meta.isComplex : undefined,
+    feynmanSimpleExplanation:
+      (meta.feynmanSimpleExplanation as string | undefined) || undefined,
+    feynmanGaps: (meta.feynmanGaps as string | undefined) || undefined,
+    feynmanCompletedAt: (meta.feynmanCompletedAt as string | undefined) || undefined,
+    fsrs: (meta.fsrs as FsrsCardState | undefined) || undefined,
+  };
+}
+
+export function mapOcclusionRow(o: Record<string, unknown>): DocumentOcclusionRecord {
+  const meta = (o.meta && typeof o.meta === 'object' ? o.meta : {}) as Record<
+    string,
+    unknown
+  >;
+  return {
+    id: String(o.id),
+    docId: String(o.doc_id),
+    page: Number(o.page || 1),
+    xRatio: Number(o.x_ratio || 0),
+    yRatio: Number(o.y_ratio || 0),
+    widthRatio: Number(o.width_ratio || 0.2),
+    heightRatio: Number(o.height_ratio || 0.1),
+    label: (o.label as string | undefined) || undefined,
+    fsrs: (meta.fsrs as FsrsCardState | undefined) || undefined,
+    createdAt: String(o.created_at || new Date().toISOString()),
+    userId: (o.user_id as string | undefined) || undefined,
   };
 }
 
@@ -41,6 +77,7 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
   folders: FolderRecord[];
   documents: DocumentRecord[];
   notes: StickyNoteRecord[];
+  occlusions: DocumentOcclusionRecord[];
   tasks: TaskRecord[];
   studySettings: StudySettings;
   planState: PersistedPlanState | null;
@@ -51,11 +88,12 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
     throw new Error('Supabase no configurado');
   }
 
-  const [foldersRes, docsRes, notesRes, tasksRes, profileRes, planRes] =
+  const [foldersRes, docsRes, notesRes, occRes, tasksRes, profileRes, planRes] =
     await Promise.all([
       supabase.from('folders').select('*').eq('user_id', userId).order('created_at'),
       supabase.from('documents').select('*').eq('user_id', userId).order('upload_date'),
       supabase.from('notes').select('*').order('created_at'),
+      supabase.from('document_occlusions').select('*').order('created_at'),
       supabase.from('tasks').select('*').eq('user_id', userId).order('created_at'),
       supabase
         .from('profiles')
@@ -95,6 +133,7 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
       currentPage: Number(d.current_page || 1),
       uploadDate: d.upload_date,
       storagePath: d.storage_path || null,
+      deadline: (d.deadline as string | null) ?? cachedLocal?.deadline ?? null,
       data: cachedLocal?.data,
     });
   }
@@ -102,6 +141,12 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
   const notes: StickyNoteRecord[] = (notesRes.data || []).map((n) =>
     mapNoteRow(n as Record<string, unknown>)
   );
+
+  // Si la tabla document_occlusions aún no fue migrada en Supabase, no bloquear snapshot
+  const occlusions: DocumentOcclusionRecord[] =
+    !occRes.error && occRes.data
+      ? occRes.data.map((o) => mapOcclusionRow(o as Record<string, unknown>))
+      : [];
 
   const tasks: TaskRecord[] = (tasksRes.data || []).map((t) => ({
     id: t.id,
@@ -128,6 +173,7 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
     folders,
     documents,
     notes,
+    occlusions,
     tasks,
     studySettings,
     planState,
@@ -196,7 +242,7 @@ export async function cloudUpsertDocument(
   doc: DocumentRecord
 ): Promise<void> {
   if (!supabase) return;
-  const { error } = await supabase.from('documents').upsert({
+  const basePayload = {
     id: doc.id,
     user_id: userId,
     folder_id: doc.folderId,
@@ -207,8 +253,20 @@ export async function cloudUpsertDocument(
     current_page: doc.currentPage,
     storage_path: doc.storagePath || null,
     upload_date: doc.uploadDate,
+  };
+  const { error } = await supabase.from('documents').upsert({
+    ...basePayload,
+    deadline: doc.deadline ?? null,
   });
-  if (error) throw error;
+  if (error) {
+    // Fallback si aún no existe columna `deadline` (migración v3 pendiente)
+    if (String(error.message || '').toLowerCase().includes('deadline')) {
+      const retry = await supabase.from('documents').upsert(basePayload);
+      if (retry.error) throw retry.error;
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function cloudDeleteDocument(
@@ -229,7 +287,7 @@ export async function cloudDeleteDocument(
 
 export async function cloudUpsertNote(userId: string, note: StickyNoteRecord): Promise<void> {
   if (!supabase) return;
-  const { error } = await supabase.from('notes').upsert({
+  const basePayload = {
     id: note.id,
     user_id: note.userId || userId,
     doc_id: note.docId,
@@ -242,14 +300,86 @@ export async function cloudUpsertNote(userId: string, note: StickyNoteRecord): P
     is_shared: Boolean(note.isShared),
     author_username: note.authorUsername ?? null,
     created_at: note.createdAt,
+  };
+  const meta: Record<string, unknown> = {};
+  if (note.format) meta.format = note.format;
+  if (note.cornellCues !== undefined) meta.cornellCues = note.cornellCues;
+  if (note.cornellSummary !== undefined) meta.cornellSummary = note.cornellSummary;
+  if (note.isComplex !== undefined) meta.isComplex = note.isComplex;
+  if (note.feynmanSimpleExplanation !== undefined) {
+    meta.feynmanSimpleExplanation = note.feynmanSimpleExplanation;
+  }
+  if (note.feynmanGaps !== undefined) meta.feynmanGaps = note.feynmanGaps;
+  if (note.feynmanCompletedAt !== undefined) {
+    meta.feynmanCompletedAt = note.feynmanCompletedAt;
+  }
+  if (note.fsrs) meta.fsrs = note.fsrs;
+
+  const { error } = await supabase.from('notes').upsert({
+    ...basePayload,
+    meta,
   });
-  if (error) throw error;
+  if (error) {
+    // Fallback retrocompatible si aún no existe columna `meta` en Supabase
+    if (String(error.message || '').toLowerCase().includes('meta')) {
+      const retry = await supabase.from('notes').upsert(basePayload);
+      if (retry.error) throw retry.error;
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function cloudDeleteNote(_userId: string, noteId: string): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.from('notes').delete().eq('id', noteId);
   if (error) throw error;
+}
+
+export async function cloudUpsertOcclusion(
+  userId: string,
+  occlusion: DocumentOcclusionRecord
+): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from('document_occlusions').upsert({
+    id: occlusion.id,
+    user_id: occlusion.userId || userId,
+    doc_id: occlusion.docId,
+    page: occlusion.page,
+    x_ratio: occlusion.xRatio,
+    y_ratio: occlusion.yRatio,
+    width_ratio: occlusion.widthRatio,
+    height_ratio: occlusion.heightRatio,
+    label: occlusion.label ?? null,
+    meta: occlusion.fsrs ? { fsrs: occlusion.fsrs } : {},
+    created_at: occlusion.createdAt,
+  });
+  if (error) {
+    // Si la tabla document_occlusions aún no existe en nube, permanecer sin romper flujo local
+    const msg = String(error.message || '').toLowerCase();
+    if (msg.includes('document_occlusions') || msg.includes('does not exist')) {
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function cloudDeleteOcclusion(
+  _userId: string,
+  occlusionId: string
+): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from('document_occlusions')
+    .delete()
+    .eq('id', occlusionId);
+  if (error) {
+    const msg = String(error.message || '').toLowerCase();
+    if (msg.includes('document_occlusions') || msg.includes('does not exist')) {
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function cloudUpsertTask(userId: string, task: TaskRecord): Promise<void> {

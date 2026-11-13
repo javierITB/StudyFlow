@@ -3,9 +3,25 @@ import {
   DiagnosticRecommendation,
   DiagnosticStats,
   DifficultyLevel,
+  DocumentRecord,
   DocumentType,
+  LearnerProfile,
   PageReadingSample,
+  StrategyMatchSuggestion,
+  StudyStrategyId,
+  SynthesisMethodId,
 } from '../types/studyflow';
+import {
+  STUDY_STRATEGY_CATALOG,
+  SYNTHESIS_METHOD_LABELS,
+} from './studyMethods';
+
+export const DEFAULT_LEARNER_PROFILE: LearnerProfile = {
+  focusPattern: 'short_bursts',
+  primaryGoal: 'comprehension',
+  timePressureTolerance: 'flexible_pace',
+  reviewPreference: 'active_recall',
+};
 
 export const MIN_VALID_SAMPLE_SECONDS = 3;
 
@@ -238,6 +254,209 @@ export function computeRecommendedPomodoro(
       speedMinPerPage,
       pagesPerBlock,
     },
+  };
+}
+
+export interface AdaptiveDiagnosisParams {
+  samples: PageReadingSample[];
+  criterion?: DiagnosticCriterion;
+  learnerProfile?: LearnerProfile;
+  documents?: DocumentRecord[];
+  hoursUntilDeadline?: number;
+}
+
+/**
+ * Cruza muestras reales por página, forma de ser del estudiante, tipo/volumen del material
+ * cargado y margen hasta la fecha límite para sugerir el Top 3 de sistemas de estudio.
+ */
+export function computeAdaptiveStrategyRecommendation({
+  samples,
+  criterion = 'balanced',
+  learnerProfile = DEFAULT_LEARNER_PROFILE,
+  documents = [],
+  hoursUntilDeadline = 72,
+}: AdaptiveDiagnosisParams): DiagnosticRecommendation {
+  const base = computeRecommendedPomodoro(samples, criterion);
+  const docCount = documents.length;
+  const totalPages = documents.reduce((acc, d) => acc + Math.max(1, d.pageCount || 1), 0);
+  const hasSlides = documents.some((d) => d.fileType === 'pptx');
+  const hasLongDenseDocs = documents.some((d) => (d.pageCount || 0) >= 25);
+  const isTightDeadline = hoursUntilDeadline > 0 && hoursUntilDeadline <= 24;
+  const estimatedHoursNeeded = (totalPages * base.recommendedSettings.speedMinPerPage) / 60;
+  const loadRatio =
+    hoursUntilDeadline > 0 && estimatedHoursNeeded > 0
+      ? estimatedHoursNeeded / Math.max(1, hoursUntilDeadline)
+      : 0.3;
+
+  const preferredSynthesis: SynthesisMethodId =
+    learnerProfile.reviewPreference === 'structured_cornell'
+      ? 'cornell'
+      : learnerProfile.reviewPreference === 'guided_sq3r'
+        ? 'sq3r'
+        : base.difficulty === 'dense' || base.difficulty === 'extreme'
+          ? 'feynman'
+          : 'fsrs_occlusion';
+
+  const scoreStrategy = (id: StudyStrategyId): { score: number; reason: string } => {
+    let score = 58;
+    const reasons: string[] = [];
+
+    switch (id) {
+      case 'pomodoro':
+        if (learnerProfile.focusPattern === 'short_bursts') {
+          score += 24;
+          reasons.push('tu atención rinde mejor en bloques acotados');
+        }
+        if (base.difficulty === 'dense' || base.difficulty === 'extreme') {
+          score += 10;
+          reasons.push('pausas regulares evitan saturación ante texto denso');
+        }
+        if (learnerProfile.timePressureTolerance === 'strict_goals') score += 8;
+        if (learnerProfile.focusPattern === 'flow_uninterrupted') score -= 12;
+        break;
+
+      case 'flowtime':
+        if (learnerProfile.focusPattern === 'flow_uninterrupted') {
+          score += 30;
+          reasons.push('no corta tu concentración en mitad de una idea');
+        }
+        if (learnerProfile.timePressureTolerance === 'flexible_pace') {
+          score += 14;
+          reasons.push('calcula descansos proporcionales a tu ritmo real');
+        }
+        if (base.stats.sampleCount === 0) {
+          score += 6;
+          reasons.push('mide tu velocidad real de páginas/minuto automáticamente');
+        }
+        if (learnerProfile.timePressureTolerance === 'strict_goals' && isTightDeadline) {
+          score -= 10;
+        }
+        break;
+
+      case 'ultradian_52_17':
+        if (learnerProfile.focusPattern === 'deep_immersion') {
+          score += 26;
+          reasons.push('aprovecha picos sostenidos de 52 min con recuperación de 17 min');
+        }
+        if (base.difficulty === 'standard' || hasSlides) {
+          score += 12;
+          reasons.push('equilibra avance continuo y pausas regenerativas');
+        }
+        if (learnerProfile.primaryGoal === 'retention') score += 8;
+        if (learnerProfile.focusPattern === 'short_bursts') score -= 14;
+        break;
+
+      case 'ultradian_90_20':
+        if (learnerProfile.focusPattern === 'deep_immersion') {
+          score += 28;
+          reasons.push('alineado a tu preferencia por inmersión profunda de ciclo largo');
+        }
+        if (base.difficulty === 'agile' || learnerProfile.primaryGoal === 'comprehension') {
+          score += 10;
+          reasons.push('permite cerrar capítulos o ejercicios largos sin cortes tempranos');
+        }
+        if (learnerProfile.focusPattern === 'short_bursts' || isTightDeadline) score -= 18;
+        break;
+
+      case 'strict_timeboxing':
+        if (learnerProfile.timePressureTolerance === 'strict_goals') {
+          score += 24;
+          reasons.push('transforma la ruta en sub-metas cerradas por página');
+        }
+        if (learnerProfile.primaryGoal === 'volume_deadline' || isTightDeadline || loadRatio > 0.45) {
+          score += 22;
+          reasons.push('redistribuye páginas automáticamente si hay desfase frente a la entrega');
+        }
+        if (learnerProfile.timePressureTolerance === 'flexible_pace') score -= 10;
+        break;
+
+      case 'interleaving':
+        if (docCount >= 2) {
+          score += 22;
+          reasons.push(`alterna tus ${docCount} archivos ponderando fechas límite`);
+        } else {
+          score -= 22;
+        }
+        if (learnerProfile.primaryGoal === 'multi_subject') {
+          score += 24;
+          reasons.push('reduce monotonía y mejora transferencia entre materias');
+        }
+        if (learnerProfile.primaryGoal === 'retention') score += 8;
+        break;
+
+      case 'sq3r':
+        if (learnerProfile.reviewPreference === 'guided_sq3r') {
+          score += 26;
+          reasons.push('guía la lectura con exploración, preguntas previas y evocación');
+        }
+        if (learnerProfile.primaryGoal === 'comprehension') {
+          score += 16;
+          reasons.push('ideal para asimilar capítulos densos desde cero');
+        }
+        if (hasLongDenseDocs || base.difficulty === 'dense' || base.difficulty === 'extreme') {
+          score += 10;
+          reasons.push('estructura material extenso antes de leer en detalle');
+        }
+        if (isTightDeadline && hasSlides) score -= 12;
+        break;
+    }
+
+    const clamped = Math.max(40, Math.min(99, score));
+    const fallbackReason =
+      reasons.length > 0
+        ? reasons.join('; ')
+        : 'Opción equilibrada para tu carga de lectura actual';
+    return {
+      score: clamped,
+      reason: fallbackReason.charAt(0).toUpperCase() + fallbackReason.slice(1) + '.',
+    };
+  };
+
+  const strategyMatches: StrategyMatchSuggestion[] = STUDY_STRATEGY_CATALOG.map(
+    (descriptor) => {
+      const { score, reason } = scoreStrategy(descriptor.id);
+      const synthesis: SynthesisMethodId =
+        descriptor.id === 'sq3r'
+          ? 'sq3r'
+          : learnerProfile.reviewPreference === 'structured_cornell'
+            ? 'cornell'
+            : learnerProfile.primaryGoal === 'retention' ||
+                learnerProfile.reviewPreference === 'active_recall'
+              ? 'fsrs_occlusion'
+              : preferredSynthesis;
+
+      return {
+        strategyId: descriptor.id,
+        title: descriptor.name,
+        compatibilityScore: score,
+        recommendedSynthesis: synthesis,
+        synthesisLabel: SYNTHESIS_METHOD_LABELS[synthesis],
+        whyItFits: reason,
+        suggestedSettings: {
+          ...descriptor.defaultConfig,
+          activeStrategy: descriptor.id,
+          presetId: descriptor.presetId,
+          preferredSynthesis: synthesis,
+          defaultNoteFormat: synthesis === 'cornell' ? 'cornell' : descriptor.defaultNoteFormat,
+          ...(descriptor.id === 'pomodoro'
+            ? {
+                studyMinutes: base.recommendedSettings.studyMinutes,
+                shortBreakMinutes: base.recommendedSettings.shortBreakMinutes,
+                longBreakMinutes: base.recommendedSettings.longBreakMinutes,
+                longBreakEveryNBlocks: base.recommendedSettings.longBreakEveryNBlocks,
+              }
+            : {}),
+          speedMinPerPage: base.recommendedSettings.speedMinPerPage,
+        },
+      };
+    }
+  )
+    .sort((a, b) => b.compatibilityScore - a.compatibilityScore)
+    .slice(0, 3);
+
+  return {
+    ...base,
+    strategyMatches,
   };
 }
 
