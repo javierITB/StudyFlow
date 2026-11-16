@@ -358,10 +358,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
           </div>
           <div className="min-w-0 flex flex-col">
             <span className="text-xs xl:text-sm font-bold tracking-tight text-white flex items-center gap-1.5 whitespace-nowrap truncate">
-              <span>StudyFlow</span>
-              <span className="inline-flex text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                2.0
-              </span>
+              <span>StudyFlexConnect</span>
             </span>
             <span className="text-[9px] font-semibold uppercase tracking-widest text-slate-400 truncate">
               Panel de Control

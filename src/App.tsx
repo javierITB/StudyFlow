@@ -23,6 +23,7 @@ import {
   StudyPlanResult,
   StudySettings,
   StudyStrategyId,
+  StudyWorkDraft,
   TaskRecord,
   ToastItem,
   UserProfile,
@@ -56,6 +57,7 @@ import {
   clearAllLocalData,
   dbDelete,
   dbGet,
+  dbGetAll,
   dbPut,
   getSetting,
   loadLocalSnapshot,
@@ -72,6 +74,7 @@ import {
   cloudDeleteNote,
   cloudDeleteOcclusion,
   cloudDeleteTask,
+  cloudDeleteWork,
   cloudSavePlanState,
   cloudSaveStudySettings,
   cloudUpsertDocument,
@@ -79,6 +82,7 @@ import {
   cloudUpsertNote,
   cloudUpsertOcclusion,
   cloudUpsertTask,
+  cloudUpsertWork,
   downloadDocumentBinaryFromCloud,
   fetchCloudSnapshot,
   uploadDocumentBinaryToCloud,
@@ -89,10 +93,16 @@ import {
   useTimer,
 } from './context/TimerContext';
 import { AppModule, Navbar } from './components/Navbar';
+import { buildRoutePath, parseRouteFromLocation } from './lib/routes';
 import { DocumentSidebar } from './components/DocumentSidebar';
+import { WorksSidebar } from './components/writer/WorksSidebar';
 import { DocumentViewer } from './components/DocumentViewer';
 import { PomodoroAndPlanner } from './components/PomodoroAndPlanner';
 import { KanbanBoard } from './components/KanbanBoard';
+import { StudyWriter } from './components/writer/StudyWriter';
+import { AcademicTemplate } from './components/writer/AcademicTemplatesModal';
+import { generateDocxBlob } from './lib/docxExport';
+import { FolderPlus } from 'lucide-react';
 import { ConfirmModal } from './components/ConfirmModal';
 import { ToastContainer } from './components/ToastContainer';
 import { AccountModal } from './components/AccountModal';
@@ -147,6 +157,7 @@ interface WorkspaceShellProps {
   notes: StickyNoteRecord[];
   occlusions: DocumentOcclusionRecord[];
   tasks: TaskRecord[];
+  works: StudyWorkDraft[];
   studySettings: StudySettings;
   planState: PersistedPlanState;
   planResult: StudyPlanResult;
@@ -212,6 +223,12 @@ interface WorkspaceShellProps {
   onAddTask: (title: string, docId: string | null, folderId: string | null) => Promise<void>;
   onToggleTask: (taskId: string) => Promise<void>;
   onDeleteTask: (taskId: string) => Promise<void>;
+  onSaveWork: (work: StudyWorkDraft) => Promise<void>;
+  onCreateNewWork: (template?: AcademicTemplate | null) => Promise<StudyWorkDraft>;
+  onDeleteWork: (id: string) => Promise<void>;
+  onExportWorkToReadings: (work: StudyWorkDraft, folderId: string | null) => Promise<void>;
+  activeWorkId: string | null;
+  onSelectWork: (id: string | null) => void;
   onNotify: (msg: string, type?: ToastItem['type']) => void;
   sidebarOpen: boolean;
   onSetSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -229,6 +246,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   notes,
   occlusions,
   tasks,
+  works,
   studySettings,
   planState,
   planResult,
@@ -279,6 +297,12 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   onAddTask,
   onToggleTask,
   onDeleteTask,
+  onSaveWork,
+  onCreateNewWork,
+  onDeleteWork,
+  onExportWorkToReadings,
+  activeWorkId,
+  onSelectWork,
   onNotify,
   sidebarOpen,
   onSetSidebarOpen,
@@ -286,6 +310,11 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   forcePomodoroSessionKey,
 }) => {
   const { startRouteStep, activeRouteStep } = useTimer();
+
+  const [writerTemplatesModalOpen, setWriterTemplatesModalOpen] = useState<boolean>(false);
+  const [exportFolderModalOpen, setExportFolderModalOpen] = useState<boolean>(false);
+  const [workForExport, setWorkForExport] = useState<StudyWorkDraft | null>(null);
+  const [selectedExportFolderId, setSelectedExportFolderId] = useState<string | null>(null);
 
   const activeDoc = useMemo(
     () =>
@@ -327,7 +356,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
 
   return (
     <div className="h-[100dvh] flex overflow-hidden bg-slate-950 text-slate-100 relative">
-      {currentModule === 'docs' && (
+      {(currentModule === 'docs' || currentModule === 'writer') && (
         <>
           {sidebarOpen && (
             <div
@@ -342,37 +371,67 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 : 'hidden lg:block lg:w-0 lg:overflow-hidden flex-shrink-0 h-full transition-all duration-200'
             }
           >
-            <DocumentSidebar
-              folders={folders}
-              documents={documents}
-              sharedDocuments={sharedDocuments}
-              activeDocId={activeDocId}
-              speedMinPerPage={studySettings.speedMinPerPage}
-              isUploading={isUploading}
-              syncStatusLabel={syncStatusLabel}
-              planResult={planResult}
-              activeRouteStepId={activeRouteStep?.id || null}
-              onCreateFolder={onCreateFolder}
-              onDeleteFolder={onDeleteFolder}
-              onUploadFiles={onUploadFiles}
-              onOpenDocument={(id) => {
-                void onOpenDocument(id);
-                if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-                  onSetSidebarOpen(false);
+            {currentModule === 'docs' ? (
+              <DocumentSidebar
+                folders={folders}
+                documents={documents}
+                sharedDocuments={sharedDocuments}
+                activeDocId={activeDocId}
+                speedMinPerPage={studySettings.speedMinPerPage}
+                isUploading={isUploading}
+                syncStatusLabel={syncStatusLabel}
+                planResult={planResult}
+                activeRouteStepId={activeRouteStep?.id || null}
+                onCreateFolder={onCreateFolder}
+                onDeleteFolder={onDeleteFolder}
+                onUploadFiles={onUploadFiles}
+                onOpenDocument={(id) => {
+                  void onOpenDocument(id);
+                  if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                    onSetSidebarOpen(false);
+                  }
+                }}
+                onMoveDocumentToFolder={onMoveDocumentToFolder}
+                onDeleteDocument={onDeleteDocument}
+                onShareDocument={user ? onShareDocument : undefined}
+                onStartRouteStep={(step, next) =>
+                  void handleStartRouteStepInViewer(step, next)
                 }
-              }}
-              onMoveDocumentToFolder={onMoveDocumentToFolder}
-              onDeleteDocument={onDeleteDocument}
-              onShareDocument={user ? onShareDocument : undefined}
-              onStartRouteStep={(step, next) =>
-                void handleStartRouteStepInViewer(step, next)
-              }
-              onToggleStepCompleted={onToggleStepCompleted}
-              onOpenPlannerTab={() => setCurrentModule('pomodoro')}
-              onCloseDrawer={() => onSetSidebarOpen(false)}
-              user={user}
-              onOpenAccountModal={onOpenAccountModal}
-            />
+                onToggleStepCompleted={onToggleStepCompleted}
+                onOpenPlannerTab={() => setCurrentModule('pomodoro')}
+                onCloseDrawer={() => onSetSidebarOpen(false)}
+                user={user}
+                onOpenAccountModal={onOpenAccountModal}
+              />
+            ) : (
+              <WorksSidebar
+                works={works}
+                activeWorkId={activeWorkId}
+                onSelectWork={(id) => {
+                  onSelectWork(id);
+                  if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                    onSetSidebarOpen(false);
+                  }
+                }}
+                onCreateNewWork={() => {
+                  onSelectWork(null);
+                }}
+                onDeleteWork={onDeleteWork}
+                onCloseDrawer={() => onSetSidebarOpen(false)}
+                onOpenTemplates={() => {
+                  onSelectWork(null);
+                }}
+                onExportToReadings={(w) => {
+                  onSelectWork(w.id);
+                  setWorkForExport(w);
+                  setSelectedExportFolderId(null);
+                  setExportFolderModalOpen(true);
+                }}
+                user={user}
+                onOpenAccountModal={onOpenAccountModal}
+                syncStatusLabel={syncStatusLabel}
+              />
+            )}
           </div>
         </>
       )}
@@ -392,9 +451,9 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
           onOpenAppearanceModal={onOpenAppearanceModal}
           onOpenTutorial={onOpenTutorial}
           notificationsSlot={notificationsSlot}
-          hideBrandOnDesktop={currentModule === 'docs' && sidebarOpen}
+          hideBrandOnDesktop={(currentModule === 'docs' || currentModule === 'writer') && sidebarOpen}
           layoutStyle={layoutStyle}
-          showOpenSidebarButton={currentModule === 'docs' && !sidebarOpen}
+          showOpenSidebarButton={(currentModule === 'docs' || currentModule === 'writer') && !sidebarOpen}
           onOpenSidebar={() => onSetSidebarOpen(true)}
         />
 
@@ -441,6 +500,32 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 collaboratorsPresence={collaboratorsPresence}
                 onShareDocument={user ? onShareDocument : undefined}
                 layoutStyle={layoutStyle}
+              />
+            </div>
+          )}
+
+          {currentModule === 'writer' && (
+            <div
+              className={`h-full overflow-hidden ${
+                layoutStyle === 'islands' ? 'pt-12 sm:pt-14' : ''
+              }`}
+            >
+              <StudyWriter
+                works={works}
+                activeWorkId={activeWorkId}
+                onSelectWork={onSelectWork}
+                notes={notes}
+                documents={documents}
+                folders={folders}
+                onSaveWork={onSaveWork}
+                onCreateNewWork={onCreateNewWork}
+                onDeleteWork={onDeleteWork}
+                onExportWorkToReadings={onExportWorkToReadings}
+                onNotify={onNotify}
+                templatesOpen={writerTemplatesModalOpen}
+                onSetTemplatesOpen={setWriterTemplatesModalOpen}
+                exportFolderModalOpen={exportFolderModalOpen}
+                onSetExportFolderModalOpen={setExportFolderModalOpen}
               />
             </div>
           )}
@@ -506,12 +591,143 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
         )}
         </main>
       </div>
+
+      {/* Modal para elegir carpeta al exportar a lecturas desde el sidebar o barra */}
+      {exportFolderModalOpen && workForExport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-indigo-500/30 p-5 shadow-2xl space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <FolderPlus className="w-5 h-5 text-indigo-400" />
+              <span>Guardar en Material y Visor</span>
+            </h3>
+            <p className="text-xs text-slate-300">
+              ¿En qué carpeta de tu biblioteca deseas archivar este trabajo exportado?
+            </p>
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              <label
+                onClick={() => setSelectedExportFolderId(null)}
+                className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                  selectedExportFolderId === null
+                    ? 'bg-indigo-600/25 border-indigo-500 text-white'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="targetFolderShell"
+                  checked={selectedExportFolderId === null}
+                  onChange={() => setSelectedExportFolderId(null)}
+                  className="hidden"
+                />
+                <span className="text-xs font-medium">Sin carpeta (Raíz de Documentos)</span>
+              </label>
+              {folders.map((f) => (
+                <label
+                  key={f.id}
+                  onClick={() => setSelectedExportFolderId(f.id)}
+                  className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                    selectedExportFolderId === f.id
+                      ? 'bg-indigo-600/25 border-indigo-500 text-white'
+                      : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="targetFolderShell"
+                    checked={selectedExportFolderId === f.id}
+                    onChange={() => setSelectedExportFolderId(f.id)}
+                    className="hidden"
+                  />
+                  <span className="text-xs font-medium">{f.name}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setExportFolderModalOpen(false)}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const target = workForExport;
+                  setExportFolderModalOpen(false);
+                  await onExportWorkToReadings(target, selectedExportFolderId);
+                  onNotify(`"${target.title}" exportado a Material y Visor`, 'success');
+                }}
+                className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/30 transition-colors"
+              >
+                Confirmar y Exportar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
+const SETTINGS_LS_PREFIX = 'sf_study_settings_v1';
+
+function readCachedStudySettings(userId?: string | null): StudySettings | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw =
+      (userId && window.localStorage.getItem(`${SETTINGS_LS_PREFIX}_${userId}`)) ||
+      window.localStorage.getItem(SETTINGS_LS_PREFIX);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StudySettings>;
+    return {
+      ...DEFAULT_STUDY_SETTINGS,
+      ...parsed,
+      appearance: resolveAppearance(parsed.appearance),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedStudySettings(settings: StudySettings, userId?: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const json = JSON.stringify(settings);
+    window.localStorage.setItem(SETTINGS_LS_PREFIX, json);
+    if (userId) {
+      window.localStorage.setItem(`${SETTINGS_LS_PREFIX}_${userId}`, json);
+    }
+  } catch {
+    // Ignorar si quota localStorage excedida
+  }
+}
+
+function clearCachedStudySettings(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith(SETTINGS_LS_PREFIX)) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach((k) => window.localStorage.removeItem(k));
+  } catch {
+    // Ignorar
+  }
+}
+
 export const App: React.FC = () => {
-  const [currentModule, setCurrentModule] = useState<AppModule>('docs');
+  const initialRoute = useMemo(
+    () =>
+      typeof window !== 'undefined'
+        ? parseRouteFromLocation(window.location.pathname)
+        : { module: 'docs' as AppModule, workId: null },
+    []
+  );
+  const [currentModule, setCurrentModule] = useState<AppModule>(initialRoute.module);
   const [folders, setFolders] = useState<FolderRecord[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [notes, setNotes] = useState<StickyNoteRecord[]>([]);
@@ -523,9 +739,44 @@ export const App: React.FC = () => {
     sourceText: string | null;
   } | null>(null);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  const [works, setWorks] = useState<StudyWorkDraft[]>([]);
+  const [activeWorkId, setActiveWorkId] = useState<string | null>(initialRoute.workId);
+  const isPopstateNavRef = useRef<boolean>(false);
+
+  // Sincronizar URL del navegador por cada zona (/material, /redaccion, /pomodoro, /pizarra)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (isPopstateNavRef.current) {
+      isPopstateNavRef.current = false;
+      return;
+    }
+    const targetPath = buildRoutePath(currentModule, currentModule === 'writer' ? activeWorkId : null);
+    if (window.location.pathname !== targetPath) {
+      const search = window.location.search || '';
+      if (window.location.pathname === '/' && currentModule === 'docs') {
+        window.history.replaceState({}, '', `${targetPath}${search}`);
+      } else {
+        window.history.pushState({}, '', `${targetPath}${search}`);
+      }
+    }
+  }, [currentModule, activeWorkId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPopState = () => {
+      const parsed = parseRouteFromLocation(window.location.pathname);
+      isPopstateNavRef.current = true;
+      setCurrentModule(parsed.module);
+      setActiveWorkId(parsed.workId);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
   const [studySettings, setStudySettings] = useState<StudySettings>(
-    DEFAULT_STUDY_SETTINGS
+    () => readCachedStudySettings() || DEFAULT_STUDY_SETTINGS
   );
+  const studySettingsRef = useRef<StudySettings>(studySettings);
+  studySettingsRef.current = studySettings;
   const [planState, setPlanState] = useState<PersistedPlanState>({
     deadline: getDefaultDeadlineLocalString(2),
     selectedDocIds: [],
@@ -650,51 +901,79 @@ export const App: React.FC = () => {
     []
   );
 
+  const cloudHydratedUserIdRef = useRef<string | null>(null);
+  const pendingCloudProfileRef = useRef<UserProfile | null>(null);
+  const activeDocIdRef = useRef<string | null>(null);
+  activeDocIdRef.current = activeDocId;
+
   const hydrateFromLocal = useCallback(async () => {
     const snap = await loadLocalSnapshot();
-    setFolders(snap.folders);
-    setDocuments(snap.documents);
-    setNotes(snap.notes);
-    setOcclusions(snap.occlusions || []);
-    setTasks(snap.tasks);
-    setStudySettings({
-      ...snap.studySettings,
-      appearance: resolveAppearance(snap.studySettings.appearance),
-    });
 
-    if (snap.planState) {
-      setPlanState(snap.planState);
-    } else {
-      const docIds = snap.documents.map((d) => d.id);
-      setPlanState({
-        deadline: getDefaultDeadlineLocalString(2),
-        selectedDocIds: docIds,
-        orderedDocIds: docIds,
-        completedStepIds: [],
-      });
-    }
+    // Si la nube ya hidrató los datos antes de que terminara IndexedDB, NO sobrescribir estado reactivo
+    if (cloudHydratedUserIdRef.current === null) {
+      setFolders(snap.folders);
+      setDocuments(snap.documents);
+      setNotes(snap.notes);
+      setOcclusions(snap.occlusions || []);
+      setTasks(snap.tasks);
+      if (snap.works && snap.works.length > 0) {
+        const cleaned = snap.works.filter(
+          (w) => !(w.title === 'Mi Primer Trabajo de Investigación' && w.wordCount === 75)
+        );
+        setWorks(cleaned);
+        const dummy = snap.works.find(
+          (w) => w.title === 'Mi Primer Trabajo de Investigación' && w.wordCount === 75
+        );
+        if (dummy) {
+          void dbDelete('works', dummy.id).catch(() => {});
+        }
+      } else {
+        setWorks([]);
+      }
 
-    if (snap.documents.length > 0) {
-      const first = snap.documents[0];
-      setActiveDocId(first.id);
-      if (first.data) {
-        setActiveBuffer(first.data);
+      const cachedLs = readCachedStudySettings();
+      const resolvedLocalSettings: StudySettings = {
+        ...snap.studySettings,
+        appearance: resolveAppearance(
+          snap.studySettings.appearance || cachedLs?.appearance
+        ),
+      };
+      setStudySettings(resolvedLocalSettings);
+
+      if (snap.planState) {
+        setPlanState(snap.planState);
+      } else {
+        const docIds = snap.documents.map((d) => d.id);
+        setPlanState({
+          deadline: getDefaultDeadlineLocalString(2),
+          selectedDocIds: docIds,
+          orderedDocIds: docIds,
+          completedStepIds: [],
+        });
+      }
+
+      if (snap.documents.length > 0 && !activeDocIdRef.current) {
+        const first = snap.documents[0];
+        setActiveDocId(first.id);
+        if (first.data) {
+          setActiveBuffer(first.data);
+        }
       }
     }
 
     const authDismissedLocal =
       typeof window !== 'undefined' &&
       window.localStorage.getItem('sf_auth_welcome_dismissed') === '1';
-    const authDismissedDb = await getSetting<boolean>('authWelcomeDismissed');
+    const authDismissedDb = await getSetting<boolean>('authWelcomeDismissed').catch(() => null);
 
     const tutorialDismissedLocal =
       typeof window !== 'undefined' &&
       window.localStorage.getItem('sf_tutorial_dismissed') === '1';
-    const tutorialDismissedDb = await getSetting<boolean>('tutorialDismissed');
+    const tutorialDismissedDb = await getSetting<boolean>('tutorialDismissed').catch(() => null);
 
-    if (!authDismissedLocal && !authDismissedDb) {
+    if (!authDismissedLocal && !authDismissedDb && cloudHydratedUserIdRef.current === null) {
       setAuthWelcomeOpen(true);
-    } else if (!tutorialDismissedLocal && !tutorialDismissedDb) {
+    } else if (!tutorialDismissedLocal && !tutorialDismissedDb && cloudHydratedUserIdRef.current === null) {
       setTutorialOpen(true);
     }
   }, []);
@@ -714,11 +993,20 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  const isHydratingRef = useRef<boolean>(false);
   const hydrateFromCloud = useCallback(
     async (profile: UserProfile) => {
+      if (isHydratingRef.current) {
+        pendingCloudProfileRef.current = profile;
+        return;
+      }
+      isHydratingRef.current = true;
       setSyncStatus('syncing');
       try {
         const cloud = await fetchCloudSnapshot(profile.id);
+        // Marcar hidratación cloud exitosa antes de aplicar estado para bloquear cualquier carrera de hydrateFromLocal
+        cloudHydratedUserIdRef.current = profile.id;
+
         setFolders(cloud.folders);
         setDocuments(cloud.documents);
         setNotes(cloud.notes);
@@ -735,11 +1023,51 @@ export const App: React.FC = () => {
         );
         setProfileLoadedFromCloud(true);
 
+        if (cloud.documents.length > 0 && !activeDocIdRef.current) {
+          const first = cloud.documents[0];
+          setActiveDocId(first.id);
+          if (first.data) {
+            setActiveBuffer(first.data);
+          }
+        }
+
+        // Sincronizar / mezclar trabajos de Redacción (study_works)
+        let mergedWorks = cloud.works;
+        if (cloud.worksTableAvailable) {
+          const localWorks = await dbGetAll<StudyWorkDraft>('works').catch(() => []);
+          const byId = new Map<string, StudyWorkDraft>();
+          for (const cw of cloud.works) {
+            byId.set(cw.id, cw);
+          }
+          const toPush: StudyWorkDraft[] = [];
+          for (const lw of localWorks) {
+            if (lw.title === 'Mi Primer Trabajo de Investigación' && lw.wordCount === 75) {
+              continue;
+            }
+            const existing = byId.get(lw.id);
+            if (!existing) {
+              byId.set(lw.id, lw);
+              toPush.push(lw);
+            } else if (new Date(lw.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) {
+              byId.set(lw.id, lw);
+              toPush.push(lw);
+            }
+          }
+          mergedWorks = Array.from(byId.values()).sort(
+            (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+          );
+          setWorks(mergedWorks);
+          for (const w of toPush) {
+            void cloudUpsertWork(profile.id, w).catch(() => {});
+          }
+        }
+
         const resolvedCloudSettings: StudySettings = {
           ...cloud.studySettings,
           appearance: resolveAppearance(cloud.studySettings.appearance),
         };
         setStudySettings(resolvedCloudSettings);
+        writeCachedStudySettings(resolvedCloudSettings, profile.id);
 
         const docIds = cloud.documents.map((d) => d.id);
         const resolvedPlan = cloud.planState || {
@@ -750,13 +1078,14 @@ export const App: React.FC = () => {
         };
         setPlanState(resolvedPlan);
 
-        // Guardar cache local de metadatos
-        await Promise.all([
+        // Guardar copia local de metadatos de forma no bloqueante
+        void Promise.allSettled([
           ...cloud.folders.map((f) => dbPut('folders', f)),
           ...cloud.documents.map((d) => dbPut('documents', d)),
           ...cloud.notes.map((n) => dbPut('notes', n)),
           ...cloud.occlusions.map((o) => dbPut('occlusions', o)),
           ...cloud.tasks.map((t) => dbPut('tasks', t)),
+          ...mergedWorks.map((w) => dbPut('works', w)),
           setSetting('studySettings', resolvedCloudSettings),
           setSetting('planState', resolvedPlan),
         ]);
@@ -773,6 +1102,15 @@ export const App: React.FC = () => {
           ),
           'warning'
         );
+      } finally {
+        isHydratingRef.current = false;
+        const queued = pendingCloudProfileRef.current;
+        if (queued) {
+          pendingCloudProfileRef.current = null;
+          if (cloudHydratedUserIdRef.current !== queued.id) {
+            void hydrateFromCloud(queued);
+          }
+        }
       }
     },
     [notify, refreshSocialData]
@@ -794,21 +1132,32 @@ export const App: React.FC = () => {
 
     if (!isSupabaseConfigured || !supabase) return;
 
+    const buildProfileFromUser = (sUser: {
+      id: string;
+      email?: string | null;
+      user_metadata?: Record<string, unknown>;
+    }): UserProfile => ({
+      id: sUser.id,
+      email: sUser.email || '',
+      fullName:
+        (sUser.user_metadata?.full_name as string | undefined) ||
+        sUser.email?.split('@')[0] ||
+        'Estudiante',
+      username:
+        (sUser.user_metadata?.username as string | undefined) || null,
+    });
+
     void supabase.auth.getSession().then(({ data }) => {
       const sUser = data.session?.user;
       if (sUser) {
-        const profile: UserProfile = {
-          id: sUser.id,
-          email: sUser.email || '',
-          fullName:
-            (sUser.user_metadata?.full_name as string | undefined) ||
-            sUser.email?.split('@')[0] ||
-            'Estudiante',
-          username:
-            (sUser.user_metadata?.username as string | undefined) || null,
-        };
+        const profile = buildProfileFromUser(sUser);
         setUser(profile);
         setAuthWelcomeOpen(false);
+        // Aplicar de inmediato la apariencia en cache asociada a este usuario mientras llega la nube
+        const lsCached = readCachedStudySettings(profile.id);
+        if (lsCached) {
+          setStudySettings(lsCached);
+        }
         void hydrateFromCloud(profile);
       } else if (
         typeof window !== 'undefined' &&
@@ -820,23 +1169,18 @@ export const App: React.FC = () => {
       }
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       const sUser = session?.user;
       if (sUser) {
-        const profile: UserProfile = {
-          id: sUser.id,
-          email: sUser.email || '',
-          fullName:
-            (sUser.user_metadata?.full_name as string | undefined) ||
-            sUser.email?.split('@')[0] ||
-            'Estudiante',
-          username:
-            (sUser.user_metadata?.username as string | undefined) || null,
-        };
+        const profile = buildProfileFromUser(sUser);
         setUser(profile);
         setAuthWelcomeOpen(false);
-        void hydrateFromCloud(profile);
+        const alreadyHydratedSameUser = cloudHydratedUserIdRef.current === profile.id;
+        if (!alreadyHydratedSameUser || event === 'SIGNED_IN') {
+          void hydrateFromCloud(profile);
+        }
       } else {
+        cloudHydratedUserIdRef.current = null;
         setUser(null);
         setProfileLoadedFromCloud(false);
         setSharedDocuments([]);
@@ -888,7 +1232,7 @@ export const App: React.FC = () => {
       }
 
       try {
-        const stored = await dbGet<DocumentRecord>('documents', docId);
+        const stored = await dbGet<DocumentRecord>('documents', docId).catch(() => undefined);
         const sharedMeta = sharedDocuments.find((d) => d.id === docId);
         const ownMeta = documents.find((d) => d.id === docId);
         const meta = ownMeta || sharedMeta || stored;
@@ -912,7 +1256,7 @@ export const App: React.FC = () => {
               setDocuments((prev) =>
                 prev.map((d) => (d.id === docId ? { ...d, currentPage: clampedPage } : d))
               );
-              await dbPut('documents', updated);
+              void dbPut('documents', updated).catch(() => {});
               void runCloudMutation((uid) => cloudUpsertDocument(uid, updated));
             }
           }
@@ -1024,79 +1368,83 @@ export const App: React.FC = () => {
       let lastBuffer: ArrayBuffer | null = null;
       const newDocIds: string[] = [];
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        try {
-          const fileType = detectDocumentType(file.name, file.type);
-          const buffer = await file.arrayBuffer();
-          const pageCount = await extractDocumentPageCount(fileType, buffer);
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          try {
+            const fileType = detectDocumentType(file.name, file.type);
+            const buffer = await file.arrayBuffer();
+            const pageCount = await extractDocumentPageCount(fileType, buffer);
 
-          const docId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          let storagePath: string | null = null;
+            const docId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            let storagePath: string | null = null;
 
-          const baseDoc: DocumentRecord = {
-            id: docId,
-            folderId: targetFolderId,
-            name: file.name,
-            fileType,
-            size: file.size,
-            pageCount: Math.max(1, pageCount),
-            currentPage: 1,
-            uploadDate: new Date().toISOString(),
-            storagePath: null,
-            data: buffer,
-          };
+            const baseDoc: DocumentRecord = {
+              id: docId,
+              folderId: targetFolderId,
+              name: file.name,
+              fileType,
+              size: file.size,
+              pageCount: Math.max(1, pageCount),
+              currentPage: 1,
+              uploadDate: new Date().toISOString(),
+              storagePath: null,
+              data: buffer,
+            };
 
-          if (userRef.current && isSupabaseConfigured) {
-            try {
-              storagePath = await uploadDocumentBinaryToCloud(
-                userRef.current.id,
-                baseDoc,
-                buffer
-              );
-              baseDoc.storagePath = storagePath;
-            } catch (err) {
-              console.warn('No se pudo subir binario a Storage, guardado local:', err);
+            if (userRef.current && isSupabaseConfigured) {
+              try {
+                storagePath = await uploadDocumentBinaryToCloud(
+                  userRef.current.id,
+                  baseDoc,
+                  buffer
+                );
+                baseDoc.storagePath = storagePath;
+              } catch (err) {
+                console.warn('No se pudo subir binario a Storage, guardado local:', err);
+              }
             }
+
+            setDocuments((prev) => [...prev, baseDoc]);
+            void runCloudMutation((uid) => cloudUpsertDocument(uid, baseDoc));
+            void dbPut('documents', baseDoc).catch((err) =>
+              console.warn('No se pudo cachear en IndexedDB:', err)
+            );
+
+            newDocIds.push(docId);
+            lastCreatedId = docId;
+            lastBuffer = buffer;
+
+            notify(
+              `${file.name} (${pageCount} ${fileType === 'pptx' ? 'diapos' : 'págs'}) guardado`,
+              'success'
+            );
+          } catch (err) {
+            const msg = formatErrorMessageEs(err, `Error al leer ${file.name}`);
+            notify(msg, 'warning');
           }
-
-          await dbPut('documents', baseDoc);
-          setDocuments((prev) => [...prev, baseDoc]);
-          void runCloudMutation((uid) => cloudUpsertDocument(uid, baseDoc));
-
-          newDocIds.push(docId);
-          lastCreatedId = docId;
-          lastBuffer = buffer;
-
-          notify(
-            `${file.name} (${pageCount} ${fileType === 'pptx' ? 'diapos' : 'págs'}) guardado`,
-            'success'
-          );
-        } catch (err) {
-          const msg = formatErrorMessageEs(err, `Error al leer ${file.name}`);
-          notify(msg, 'warning');
         }
-      }
 
-      if (newDocIds.length > 0) {
-        setPlanState((prev) => {
-          const updated: PersistedPlanState = {
-            ...prev,
-            selectedDocIds: Array.from(new Set([...prev.selectedDocIds, ...newDocIds])),
-            orderedDocIds: Array.from(new Set([...prev.orderedDocIds, ...newDocIds])),
-          };
-          void setSetting('planState', updated);
-          void runCloudMutation((uid) => cloudSavePlanState(uid, updated));
-          return updated;
-        });
-      }
+        if (newDocIds.length > 0) {
+          setPlanState((prev) => {
+            const updated: PersistedPlanState = {
+              ...prev,
+              selectedDocIds: Array.from(new Set([...prev.selectedDocIds, ...newDocIds])),
+              orderedDocIds: Array.from(new Set([...prev.orderedDocIds, ...newDocIds])),
+            };
+            void setSetting('planState', updated);
+            void runCloudMutation((uid) => cloudSavePlanState(uid, updated));
+            return updated;
+          });
+        }
 
-      if (lastCreatedId && lastBuffer) {
-        setActiveDocId(lastCreatedId);
-        setActiveBuffer(lastBuffer);
+        if (lastCreatedId && lastBuffer) {
+          setActiveDocId(lastCreatedId);
+          setActiveBuffer(lastBuffer);
+        }
+      } finally {
+        setIsUploading(false);
       }
-
-      setIsUploading(false);
     },
     [notify, runCloudMutation]
   );
@@ -1355,13 +1703,58 @@ export const App: React.FC = () => {
     []
   );
 
+  const settingsCloudInFlightRef = useRef<boolean>(false);
+  const pendingCloudSettingsRef = useRef<StudySettings | null>(null);
+
+  const flushSettingsToCloud = useCallback(
+    async (settingsToSave: StudySettings) => {
+      const currentUser = userRef.current;
+      if (!currentUser || !isSupabaseConfigured) return;
+
+      if (settingsCloudInFlightRef.current) {
+        pendingCloudSettingsRef.current = settingsToSave;
+        return;
+      }
+
+      settingsCloudInFlightRef.current = true;
+      setSyncStatus('syncing');
+      try {
+        await cloudSaveStudySettings(currentUser.id, settingsToSave);
+        setSyncStatus('synced');
+      } catch (err) {
+        console.error('Error guardando configuración/tema en Supabase:', err);
+        setSyncStatus('error');
+        notify(
+          formatErrorMessageEs(
+            err,
+            'No se pudo guardar tu configuración visual en la nube'
+          ),
+          'warning'
+        );
+      } finally {
+        settingsCloudInFlightRef.current = false;
+        const queued = pendingCloudSettingsRef.current;
+        if (queued) {
+          pendingCloudSettingsRef.current = null;
+          void flushSettingsToCloud(queued);
+        }
+      }
+    },
+    [notify]
+  );
+
   const handleUpdateSettings = useCallback(
     async (next: StudySettings) => {
+      studySettingsRef.current = next;
       setStudySettings(next);
-      await setSetting('studySettings', next);
-      void runCloudMutation((uid) => cloudSaveStudySettings(uid, next));
+      writeCachedStudySettings(next, userRef.current?.id);
+      // Persistir en IndexedDB sin bloquear la subida a Supabase
+      void setSetting('studySettings', next).catch((err) => {
+        console.warn('[StudyFlow] Error guardando settings en IndexedDB:', err);
+      });
+      void flushSettingsToCloud(next);
     },
-    [runCloudMutation]
+    [flushSettingsToCloud]
   );
 
   const captureSessionStartSnapshot = useCallback(() => {
@@ -1379,43 +1772,46 @@ export const App: React.FC = () => {
   const handleSelectStrategy = useCallback(
     async (strategyId: StudyStrategyId) => {
       captureSessionStartSnapshot();
-      const next = applyStrategyToSettings(studySettings, strategyId);
+      const next = applyStrategyToSettings(studySettingsRef.current, strategyId);
       await handleUpdateSettings(next);
       const desc = getStrategyDescriptor(strategyId);
       notify(`Estrategia activa: ${desc.name}`, 'success');
     },
-    [studySettings, handleUpdateSettings, captureSessionStartSnapshot, notify]
+    [handleUpdateSettings, captureSessionStartSnapshot, notify]
   );
 
   const handleToggleAudio = useCallback(async () => {
+    const curr = studySettingsRef.current;
     const next: StudySettings = {
-      ...studySettings,
-      audioEnabled: !studySettings.audioEnabled,
+      ...curr,
+      audioEnabled: !curr.audioEnabled,
     };
     await handleUpdateSettings(next);
     notify(
       next.audioEnabled ? 'Alertas sonoras activadas' : 'Alertas sonoras silenciadas',
       'info'
     );
-  }, [studySettings, handleUpdateSettings, notify]);
+  }, [handleUpdateSettings, notify]);
 
   const handleChangeAppearance = useCallback(
     (nextAppearance: AppearanceSettings) => {
+      const curr = studySettingsRef.current;
       void handleUpdateSettings({
-        ...studySettings,
+        ...curr,
         appearance: resolveAppearance(nextAppearance),
       });
     },
-    [studySettings, handleUpdateSettings]
+    [handleUpdateSettings]
   );
 
   const handleResetAppearance = useCallback(() => {
+    const curr = studySettingsRef.current;
     void handleUpdateSettings({
-      ...studySettings,
+      ...curr,
       appearance: DEFAULT_APPEARANCE,
     });
     notify('Apariencia restablecida a valores predeterminados', 'info');
-  }, [studySettings, handleUpdateSettings, notify]);
+  }, [handleUpdateSettings, notify]);
 
   const handleUpdatePlanState = useCallback(
     async (patch: Partial<PersistedPlanState>) => {
@@ -1510,6 +1906,149 @@ export const App: React.FC = () => {
     [notify, runCloudMutation]
   );
 
+  const workSyncTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const handleSaveWork = useCallback(
+    async (work: StudyWorkDraft) => {
+      setWorks((prev) => {
+        const exists = prev.some((w) => w.id === work.id);
+        if (exists) {
+          return prev.map((w) => (w.id === work.id ? work : w));
+        }
+        return [work, ...prev];
+      });
+      void dbPut('works', work).catch(() => {});
+
+      const existingTimer = workSyncTimersRef.current.get(work.id);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+      const timer = setTimeout(() => {
+        workSyncTimersRef.current.delete(work.id);
+        const currentUser = userRef.current;
+        if (currentUser && isSupabaseConfigured) {
+          void cloudUpsertWork(currentUser.id, work).catch((err) => {
+            console.warn('[StudyFlow] Error sincronizando borrador con la nube:', err);
+          });
+        }
+      }, 800);
+      workSyncTimersRef.current.set(work.id, timer);
+    },
+    []
+  );
+
+  const handleCreateNewWork = useCallback(async (template?: AcademicTemplate | null) => {
+    const defaultTitle = template ? template.defaultTitle : 'Documento en Blanco';
+    const htmlContent = template ? template.htmlContent : '<p></p>';
+    const words = template
+      ? template.htmlContent.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).length
+      : 0;
+    const targetWords = template ? template.targetWords : 0;
+
+    const preferredPaper =
+      (typeof window !== 'undefined' &&
+        (window.localStorage.getItem('sf_writer_default_paper_format') as
+          | 'letter'
+          | 'legal'
+          | 'a4'
+          | null)) ||
+      'letter';
+
+    const newWork: StudyWorkDraft = {
+      id: `work_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      title: defaultTitle,
+      contentHtml: htmlContent,
+      contentText: template ? template.name : '',
+      wordCount: words,
+      targetWordCount: targetWords,
+      paperSize: preferredPaper,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Actualizar estado y abrir de inmediato
+    setWorks((prev) => [newWork, ...prev]);
+    setActiveWorkId(newWork.id);
+
+    void dbPut('works', newWork).catch((err) => {
+      console.warn('[StudyFlow] Error persistiendo borrador en IndexedDB (manteniendo en memoria):', err);
+    });
+    if (userRef.current && isSupabaseConfigured) {
+      void cloudUpsertWork(userRef.current.id, newWork).catch((err) => {
+        console.warn('[StudyFlow] Error creando borrador en Supabase:', err);
+      });
+    }
+    return newWork;
+  }, []);
+
+  const handleDeleteWork = useCallback(
+    async (id: string) => {
+      const pendingTimer = workSyncTimersRef.current.get(id);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        workSyncTimersRef.current.delete(id);
+      }
+      setWorks((prev) => prev.filter((w) => w.id !== id));
+      void dbDelete('works', id).catch(() => {});
+      if (userRef.current && isSupabaseConfigured) {
+        void cloudDeleteWork(userRef.current.id, id).catch((err) => {
+          console.warn('[StudyFlow] Error eliminando borrador en Supabase:', err);
+        });
+      }
+      notify('Trabajo eliminado del taller de redacción', 'info');
+    },
+    [notify]
+  );
+
+  const handleExportWorkToReadings = useCallback(
+    async (work: StudyWorkDraft, targetFolderId: string | null) => {
+      try {
+        const blob = await generateDocxBlob(work.contentHtml, work.title, work.paperSize || 'letter');
+        const arrayBuffer = await blob.arrayBuffer();
+
+        const docId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const docName = `${work.title.trim().replace(/[\\/:*?"<>|]/g, '_') || 'Trabajo'}.docx`;
+
+        const newDoc: DocumentRecord = {
+          id: docId,
+          folderId: targetFolderId,
+          name: docName,
+          fileType: 'docx',
+          size: arrayBuffer.byteLength,
+          pageCount: Math.max(1, Math.ceil(work.wordCount / 250)),
+          currentPage: 1,
+          uploadDate: new Date().toISOString(),
+          data: arrayBuffer,
+        };
+
+        await dbPut('documents', newDoc);
+        setDocuments((prev) => [newDoc, ...prev]);
+
+        await runCloudMutation(async (uid) => {
+          await cloudUpsertDocument(uid, newDoc);
+          await uploadDocumentBinaryToCloud(uid, newDoc, arrayBuffer);
+        });
+
+        setPlanState((prev) => {
+          const nextSelected = [...prev.selectedDocIds, docId];
+          const nextOrdered = [...prev.orderedDocIds, docId];
+          const updated: PersistedPlanState = {
+            ...prev,
+            selectedDocIds: nextSelected,
+            orderedDocIds: nextOrdered,
+          };
+          void setSetting('planState', updated);
+          return updated;
+        });
+
+        notify(`"${docName}" agregado exitosamente a Material y Visor`, 'success');
+      } catch (err) {
+        notify(formatErrorMessageEs(err, 'No se pudo exportar a lectura'), 'error');
+      }
+    },
+    [runCloudMutation, notify]
+  );
+
   // Autenticacion y respaldo JSON
   const handleSignIn = async (identifier: string, password: string) => {
     if (!supabase) return;
@@ -1563,7 +2102,9 @@ export const App: React.FC = () => {
   const handleSignOut = async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
-    await clearAllLocalData();
+    await clearAllLocalData().catch(() => {});
+    clearCachedStudySettings();
+    cloudHydratedUserIdRef.current = null;
     setFolders([]);
     setDocuments([]);
     setSharedDocuments([]);
@@ -1571,9 +2112,13 @@ export const App: React.FC = () => {
     setIncomingShares([]);
     setCollaboratorsPresence([]);
     setNotes([]);
+    setOcclusions([]);
     setTasks([]);
+    setWorks([]);
+    setActiveWorkId(null);
     setActiveDocId(null);
     setActiveBuffer(null);
+    setStudySettings(DEFAULT_STUDY_SETTINGS);
     setUser(null);
     setProfileLoadedFromCloud(false);
     setSyncStatus('local');
@@ -2230,6 +2775,7 @@ export const App: React.FC = () => {
         notes={notes}
         occlusions={occlusions}
         tasks={tasks}
+        works={works}
         studySettings={studySettings}
         planState={planState}
         planResult={planResult}
@@ -2295,6 +2841,12 @@ export const App: React.FC = () => {
         onAddTask={handleAddTask}
         onToggleTask={handleToggleTask}
         onDeleteTask={handleDeleteTask}
+        onSaveWork={handleSaveWork}
+        onCreateNewWork={handleCreateNewWork}
+        onDeleteWork={handleDeleteWork}
+        onExportWorkToReadings={handleExportWorkToReadings}
+        activeWorkId={activeWorkId}
+        onSelectWork={setActiveWorkId}
         onNotify={notify}
         sidebarOpen={sidebarOpen}
         onSetSidebarOpen={setSidebarOpen}

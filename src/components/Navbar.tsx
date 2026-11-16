@@ -14,6 +14,7 @@ import {
   Palette,
   PanelLeftOpen,
   Pause,
+  PenTool,
   Play,
   Square,
   Users,
@@ -32,8 +33,9 @@ import {
   computeFlowtimeBreakMinutes,
   getStrategyDescriptor,
 } from '../lib/studyMethods';
+import { buildRoutePath } from '../lib/routes';
 
-export type AppModule = 'docs' | 'pomodoro' | 'board';
+export type AppModule = 'docs' | 'writer' | 'pomodoro' | 'board';
 
 interface NavbarProps {
   currentModule: AppModule;
@@ -105,6 +107,12 @@ export const Navbar: React.FC<NavbarProps> = ({
       label: 'Material y Visor',
       shortLabel: 'Visor',
       icon: <FileText className="w-4 h-4" />,
+    },
+    {
+      id: 'writer',
+      label: 'Redacción & Trabajos',
+      shortLabel: 'Redacción',
+      icon: <PenTool className="w-4 h-4" />,
     },
     {
       id: 'pomodoro',
@@ -266,7 +274,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <BookOpen className="w-3.5 h-3.5 text-white" />
             </div>
             <span className="hidden sm:inline text-xs font-bold tracking-tight text-white pr-1 whitespace-nowrap">
-              StudyFlow
+              StudyFlexConnect
             </span>
           </div>
         </div>
@@ -279,10 +287,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           {tabs.map((tab) => {
             const active = currentModule === tab.id;
             return (
-              <button
+              <a
                 key={tab.id}
-                type="button"
-                onClick={() => onSwitchModule(tab.id)}
+                href={buildRoutePath(tab.id)}
+                onClick={(e) => {
+                  if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                    e.preventDefault();
+                    onSwitchModule(tab.id);
+                  }
+                }}
                 title={tab.label}
                 className={`px-2 sm:px-2.5 xl:px-3 py-1.5 rounded-xl text-[11px] xl:text-xs font-medium flex items-center gap-1 sm:gap-1.5 whitespace-nowrap transition-all ${
                   active
@@ -294,7 +307,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className={active ? 'sm:hidden' : 'hidden'}>{tab.shortLabel}</span>
                 <span className="hidden sm:inline xl:hidden">{tab.shortLabel}</span>
                 <span className="hidden xl:inline">{tab.label}</span>
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -434,10 +447,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <BookOpen className="w-4 h-4 xl:w-5 xl:h-5 text-white" />
         </div>
         <h1 className="hidden sm:flex text-sm xl:text-base font-bold tracking-tight text-white items-center gap-1.5 whitespace-nowrap">
-          <span>StudyFlow</span>
-          <span className="hidden xl:inline-flex text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
-            2.0
-          </span>
+          <span>StudyFlexConnect</span>
         </h1>
       </div>
 
@@ -448,10 +458,15 @@ export const Navbar: React.FC<NavbarProps> = ({
         {tabs.map((tab) => {
           const active = currentModule === tab.id;
           return (
-            <button
+            <a
               key={tab.id}
-              type="button"
-              onClick={() => onSwitchModule(tab.id)}
+              href={buildRoutePath(tab.id)}
+              onClick={(e) => {
+                if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                  e.preventDefault();
+                  onSwitchModule(tab.id);
+                }
+              }}
               title={tab.label}
               className={`px-2 sm:px-2.5 xl:px-3 py-1 xl:py-1.5 rounded-lg text-[11px] xl:text-xs font-medium flex items-center gap-1 sm:gap-1.5 whitespace-nowrap transition-all ${
                 active
@@ -463,7 +478,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className={active ? 'sm:hidden' : 'hidden'}>{tab.shortLabel}</span>
               <span className="hidden sm:inline xl:hidden">{tab.shortLabel}</span>
               <span className="hidden xl:inline">{tab.label}</span>
-            </button>
+            </a>
           );
         })}
       </nav>

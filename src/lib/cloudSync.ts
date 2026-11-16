@@ -11,11 +11,12 @@ import {
   PersistedPlanState,
   StickyNoteRecord,
   StudySettings,
+  StudyWorkDraft,
   TaskRecord,
 } from '../types/studyflow';
 import { DEFAULT_STUDY_SETTINGS } from './studyMethods';
 import { supabase } from './supabaseClient';
-import { dbGet, dbPut } from './localDb';
+import { dbGetAll, dbPut } from './localDb';
 
 const STORAGE_BUCKET = 'study-files';
 
@@ -73,12 +74,34 @@ export function mapOcclusionRow(o: Record<string, unknown>): DocumentOcclusionRe
   };
 }
 
+export function mapWorkRow(w: Record<string, unknown>): StudyWorkDraft {
+  const rawPaperSize = String(w.paper_size || 'letter');
+  const paperSize: 'letter' | 'legal' | 'a4' =
+    rawPaperSize === 'legal' || rawPaperSize === 'a4' ? rawPaperSize : 'letter';
+  return {
+    id: String(w.id),
+    title: String(w.title || 'Trabajo sin título'),
+    contentHtml: String(w.content_html || '<p></p>'),
+    contentText: typeof w.content_text === 'string' ? w.content_text : '',
+    wordCount: Number(w.word_count || 0),
+    targetWordCount:
+      typeof w.target_word_count === 'number' ? w.target_word_count : null,
+    tags: Array.isArray(w.tags) ? (w.tags as string[]) : undefined,
+    linkedDocId: (w.linked_doc_id as string | null) ?? null,
+    paperSize,
+    createdAt: String(w.created_at || new Date().toISOString()),
+    updatedAt: String(w.updated_at || new Date().toISOString()),
+  };
+}
+
 export async function fetchCloudSnapshot(userId: string): Promise<{
   folders: FolderRecord[];
   documents: DocumentRecord[];
   notes: StickyNoteRecord[];
   occlusions: DocumentOcclusionRecord[];
   tasks: TaskRecord[];
+  works: StudyWorkDraft[];
+  worksTableAvailable: boolean;
   studySettings: StudySettings;
   planState: PersistedPlanState | null;
   username: string | null;
@@ -88,13 +111,18 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
     throw new Error('Supabase no configurado');
   }
 
-  const [foldersRes, docsRes, notesRes, occRes, tasksRes, profileRes, planRes] =
+  const [foldersRes, docsRes, notesRes, occRes, tasksRes, worksRes, profileRes, planRes] =
     await Promise.all([
       supabase.from('folders').select('*').eq('user_id', userId).order('created_at'),
       supabase.from('documents').select('*').eq('user_id', userId).order('upload_date'),
       supabase.from('notes').select('*').order('created_at'),
       supabase.from('document_occlusions').select('*').order('created_at'),
       supabase.from('tasks').select('*').eq('user_id', userId).order('created_at'),
+      supabase
+        .from('study_works')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false }),
       supabase
         .from('profiles')
         .select('study_settings, username, full_name')
@@ -120,10 +148,20 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
     createdAt: f.created_at,
   }));
 
-  const documents: DocumentRecord[] = [];
-  for (const d of docsRes.data || []) {
-    const cachedLocal = await dbGet<DocumentRecord>('documents', d.id);
-    documents.push({
+  // Obtener documentos locales en un solo lote para asociar buffer de datos si existe
+  const localDocsMap = new Map<string, DocumentRecord>();
+  try {
+    const localDocs = await dbGetAll<DocumentRecord>('documents');
+    for (const ld of localDocs) {
+      localDocsMap.set(ld.id, ld);
+    }
+  } catch {
+    // Si IndexedDB no está disponible o tarda, continuar sin fallar el snapshot de la nube
+  }
+
+  const documents: DocumentRecord[] = (docsRes.data || []).map((d) => {
+    const cachedLocal = localDocsMap.get(d.id);
+    return {
       id: d.id,
       folderId: d.folder_id || null,
       name: d.name,
@@ -135,8 +173,8 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
       storagePath: d.storage_path || null,
       deadline: (d.deadline as string | null) ?? cachedLocal?.deadline ?? null,
       data: cachedLocal?.data,
-    });
-  }
+    };
+  });
 
   const notes: StickyNoteRecord[] = (notesRes.data || []).map((n) =>
     mapNoteRow(n as Record<string, unknown>)
@@ -157,6 +195,13 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
     createdAt: t.created_at,
   }));
 
+  // Si la tabla study_works aún no fue migrada en Supabase, no bloquear snapshot
+  const worksTableAvailable = !worksRes.error;
+  const works: StudyWorkDraft[] =
+    !worksRes.error && worksRes.data
+      ? worksRes.data.map((w) => mapWorkRow(w as Record<string, unknown>))
+      : [];
+
   const remoteSettings = (profileRes.data?.study_settings || {}) as Partial<StudySettings>;
   const studySettings: StudySettings = {
     ...DEFAULT_STUDY_SETTINGS,
@@ -175,6 +220,8 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
     notes,
     occlusions,
     tasks,
+    works,
+    worksTableAvailable,
     studySettings,
     planState,
     username: (profileRes.data?.username as string | null) ?? null,
@@ -193,6 +240,7 @@ export async function uploadDocumentBinaryToCloud(
     pdf: 'application/pdf',
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    rich_text: 'text/html;charset=utf-8',
   };
   const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(storagePath, buffer, {
     contentType: mimeMap[doc.fileType],
@@ -211,7 +259,9 @@ export async function downloadDocumentBinaryFromCloud(
     .download(doc.storagePath);
   if (error || !data) throw error || new Error('No se pudo descargar el archivo');
   const buffer = await data.arrayBuffer();
-  await dbPut('documents', { ...doc, data: buffer });
+  void dbPut('documents', { ...doc, data: buffer }).catch((err) =>
+    console.warn('No se pudo cachear binario en IndexedDB:', err)
+  );
   return buffer;
 }
 
@@ -411,11 +461,54 @@ export async function cloudSaveStudySettings(
   settings: StudySettings
 ): Promise<void> {
   if (!supabase) return;
-  const { error } = await supabase.from('profiles').upsert({
-    id: userId,
-    study_settings: settings,
-    updated_at: new Date().toISOString(),
-  });
+  const { error } = await supabase
+    .from('profiles')
+    .upsert(
+      {
+        id: userId,
+        study_settings: settings,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+  if (error) throw error;
+}
+
+export async function cloudUpsertWork(
+  userId: string,
+  work: StudyWorkDraft
+): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from('study_works').upsert(
+    {
+      id: work.id,
+      user_id: userId,
+      title: work.title || 'Trabajo sin título',
+      content_html: work.contentHtml || '',
+      content_text: work.contentText || '',
+      word_count: work.wordCount || 0,
+      target_word_count: work.targetWordCount ?? null,
+      tags: work.tags || [],
+      linked_doc_id: work.linkedDocId || null,
+      paper_size: work.paperSize || 'letter',
+      created_at: work.createdAt,
+      updated_at: work.updatedAt,
+    },
+    { onConflict: 'id' }
+  );
+  if (error) throw error;
+}
+
+export async function cloudDeleteWork(
+  userId: string,
+  workId: string
+): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from('study_works')
+    .delete()
+    .eq('id', workId)
+    .eq('user_id', userId);
   if (error) throw error;
 }
 

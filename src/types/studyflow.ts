@@ -1,4 +1,18 @@
-export type DocumentType = 'pdf' | 'docx' | 'pptx';
+export type DocumentType = 'pdf' | 'docx' | 'pptx' | 'rich_text';
+
+export interface StudyWorkDraft {
+  id: string;
+  title: string;
+  contentHtml: string;
+  contentText?: string;
+  wordCount: number;
+  targetWordCount?: number | null;
+  tags?: string[];
+  createdAt: string;
+  updatedAt: string;
+  linkedDocId?: string | null;
+  paperSize?: 'letter' | 'legal' | 'a4';
+}
 
 export type FolderColor = 'indigo' | 'emerald' | 'amber' | 'rose' | 'sky' | 'purple';
 
