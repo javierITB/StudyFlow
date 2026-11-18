@@ -78,7 +78,17 @@ function parseInlineNodes(element: Element): TextRun[] {
 
   const walk = (
     node: Node,
-    state: { bold?: boolean; italics?: boolean; underline?: boolean; font?: string; size?: number }
+    state: {
+      bold?: boolean;
+      italics?: boolean;
+      underline?: boolean;
+      strike?: boolean;
+      superScript?: boolean;
+      subScript?: boolean;
+      color?: string;
+      font?: string;
+      size?: number;
+    }
   ) => {
     if (node.nodeType === 3 /* Node.TEXT_NODE */) {
       const text = node.textContent || '';
@@ -89,6 +99,10 @@ function parseInlineNodes(element: Element): TextRun[] {
           bold: state.bold,
           italics: state.italics,
           underline: state.underline ? {} : undefined,
+          strike: state.strike,
+          superScript: state.superScript,
+          subScript: state.subScript,
+          color: state.color,
           font: state.font || 'Arial',
           size: state.size ? state.size * 2 : 24,
         })
@@ -120,6 +134,21 @@ function parseInlineNodes(element: Element): TextRun[] {
       if (tagName === 'u' || style.textDecoration?.includes('underline')) {
         nextState.underline = true;
       }
+      if (tagName === 's' || tagName === 'strike' || tagName === 'del' || style.textDecoration?.includes('line-through')) {
+        nextState.strike = true;
+      }
+      if (tagName === 'sup') {
+        nextState.superScript = true;
+      }
+      if (tagName === 'sub') {
+        nextState.subScript = true;
+      }
+      if (style.color) {
+        const hex = style.color.trim();
+        if (hex.startsWith('#')) {
+          nextState.color = hex.slice(1);
+        }
+      }
       if (style.fontFamily) {
         nextState.font = style.fontFamily.replace(/['"]/g, '').split(',')[0].trim();
       }
@@ -142,6 +171,9 @@ function appendBlockElement(el: HTMLElement, children: Array<Paragraph | Table>)
   const tag = el.tagName.toLowerCase();
   const textAlign = (el.style && el.style.textAlign) || el.getAttribute?.('data-align') || 'left';
   const align = getAlignment(textAlign);
+  const indentAttr = el.getAttribute?.('data-indent');
+  const indentLevel = indentAttr ? parseInt(indentAttr, 10) : 0;
+  const indentTwip = indentLevel > 0 ? indentLevel * 720 : undefined;
 
   if (el.getAttribute?.('data-type') === 'page-break' || el.classList?.contains('page-break-wrapper')) {
     children.push(
@@ -289,6 +321,7 @@ function appendBlockElement(el: HTMLElement, children: Array<Paragraph | Table>)
         new Paragraph({
           children: parseInlineNodes(el),
           alignment: align,
+          indent: indentTwip ? { left: indentTwip } : undefined,
           spacing: { before: 60, after: 120, line: 360 },
         })
       );
@@ -306,6 +339,7 @@ function appendBlockElement(el: HTMLElement, children: Array<Paragraph | Table>)
       new Paragraph({
         children: parseInlineNodes(el),
         alignment: align,
+        indent: indentTwip ? { left: indentTwip } : undefined,
         spacing: { before: 60, after: 120, line: 360 },
       })
     );

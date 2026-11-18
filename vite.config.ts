@@ -5,9 +5,11 @@ import react from '@vitejs/plugin-react';
     // Carga variables locales (.env/.env.local) y de entorno CI (Vercel) para
     // exponer solo las claves publicas de Supabase sin filtrar claves privadas
     // como SUPABASE_SERVICE_ROLE_KEY.
-    const loaded = loadEnv(mode, process.cwd(), ['VITE_', 'NEXT_PUBLIC_', 'SUPABASE_']);
+    const loaded = loadEnv(mode, process.cwd(), ['VITE_', 'NEXT_PUBLIC_', 'SUPABASE_', 'PORT']);
     const pickPublic = (key: string): string =>
       (loaded[key] || process.env[key] || '').trim();
+
+    const port = Number(loaded['PORT'] || process.env.PORT) || 5180;
 
     const supabaseUrl =
       pickPublic('VITE_SUPABASE_URL') ||
@@ -26,6 +28,13 @@ import react from '@vitejs/plugin-react';
 
     return {
       plugins: [react()],
+      server: {
+        port,
+        strictPort: false,
+      },
+      preview: {
+        port,
+      },
       envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
       define: {
         'import.meta.env.SUPABASE_URL': JSON.stringify(supabaseUrl),

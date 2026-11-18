@@ -125,7 +125,7 @@ npm install
 npm run dev
 ```
 
-Con esto la aplicación ya funciona de inmediato en `http://localhost:5173` en **Modo Local (IndexedDB)**.
+Con esto la aplicación ya funciona de inmediato en `http://localhost:5180` en **Modo Local (IndexedDB)**.
 
 ### 2. Calidad y pruebas
 
@@ -145,7 +145,7 @@ Si deseas habilitar cuentas individuales por estudiante, sincronización en la n
    * `SUPABASE_URL` *(o `VITE_SUPABASE_URL`)*
    * `SUPABASE_PUBLISHABLE_KEY` *(o `SUPABASE_ANON_KEY` / `VITE_SUPABASE_PUBLISHABLE_KEY`)*
    > 🔒 Por seguridad, [`vite.config.ts`](./vite.config.ts) inyecta únicamente estas claves públicas en el cliente y nunca expone secretos como `SUPABASE_SERVICE_ROLE_KEY`.
-3. **Configura Authentication → URL Configuration en Supabase**: agrega `http://localhost:5173` y tu dominio de producción (ej. `https://studyflexconnect.vercel.app`) en **Site URL / Redirect URLs**.
+3. **Configura Authentication → URL Configuration en Supabase**: agrega `http://localhost:5180` (o el puerto que definas) y tu dominio de producción (ej. `https://studyflexconnect.vercel.app`) en **Site URL / Redirect URLs**.
 4. **Despliega en Vercel** con *Framework Preset: Vite*, *Build Command:* `npm run build` y *Output Directory:* `dist` ([`vercel.json`](./vercel.json) ya resuelve el *SPA fallback*).
 
 ---

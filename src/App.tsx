@@ -526,6 +526,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 onSetTemplatesOpen={setWriterTemplatesModalOpen}
                 exportFolderModalOpen={exportFolderModalOpen}
                 onSetExportFolderModalOpen={setExportFolderModalOpen}
+                layoutStyle={layoutStyle}
               />
             </div>
           )}
@@ -853,6 +854,7 @@ export const App: React.FC = () => {
 
   const handleOpenSignInFromWelcome = useCallback(() => {
     setAuthWelcomeOpen(false);
+    setTutorialOpen(false);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('sf_auth_welcome_dismissed', '1');
     }
@@ -973,6 +975,7 @@ export const App: React.FC = () => {
 
     if (!authDismissedLocal && !authDismissedDb && cloudHydratedUserIdRef.current === null) {
       setAuthWelcomeOpen(true);
+      setTutorialOpen(false);
     } else if (!tutorialDismissedLocal && !tutorialDismissedDb && cloudHydratedUserIdRef.current === null) {
       setTutorialOpen(true);
     }
@@ -2972,7 +2975,7 @@ export const App: React.FC = () => {
       />
 
       <TutorialOverlay
-        open={tutorialOpen}
+        open={tutorialOpen && !authWelcomeOpen && !accountModalOpen}
         onClose={handleCloseTutorial}
         onNavigateModule={setCurrentModule}
         onEnsureSidebarOpen={handleEnsureSidebarOpen}

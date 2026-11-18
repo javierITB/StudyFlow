@@ -10,13 +10,17 @@ import { CustomTable, CustomTableRow, CustomTableCell, CustomTableHeader, LineHe
 import { PageBreak } from '../../lib/tiptap/PageBreak';
 import { FontSize } from '../../lib/tiptap/fontSize';
 import { AutoPaginationExtension } from '../../lib/tiptap/AutoPaginationExtension';
+import { Superscript, Subscript } from '../../lib/tiptap/AcademicScriptExtensions';
+import { TextColor, AcademicHighlight } from '../../lib/tiptap/AcademicColorExtensions';
+import { IndentExtension } from '../../lib/tiptap/IndentExtension';
+import Link from '@tiptap/extension-link';
 import { WriterToolbar } from './WriterToolbar';
 import { CitationsDrawer } from './CitationsDrawer';
 import { AcademicTemplatesModal, AcademicTemplate, ACADEMIC_TEMPLATES } from './AcademicTemplatesModal';
 import { TemplatesWelcomeHub } from './TemplatesWelcomeHub';
-import { DocumentRecord, FolderRecord, StickyNoteRecord, StudyWorkDraft } from '../../types/studyflow';
+import { DocumentRecord, FolderRecord, LayoutStyleId, StickyNoteRecord, StudyWorkDraft } from '../../types/studyflow';
 import { exportHtmlToDocx, exportHtmlToMarkdown, exportHtmlToPdf, printFormattedDocument } from '../../lib/docxExport';
-import { Clock, Expand, FileText, Target } from 'lucide-react';
+import { BookOpen, Clock, Expand, FileText, Target, ZoomIn, ZoomOut } from 'lucide-react';
 import { useTimer } from '../../context/TimerContext';
 
 interface StudyWriterProps {
@@ -35,6 +39,7 @@ interface StudyWriterProps {
   onSetTemplatesOpen?: (open: boolean) => void;
   exportFolderModalOpen?: boolean;
   onSetExportFolderModalOpen?: (open: boolean) => void;
+  layoutStyle?: LayoutStyleId;
 }
 
 export const StudyWriter: React.FC<StudyWriterProps> = ({
@@ -53,6 +58,7 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   onSetTemplatesOpen: onSetTemplatesOpenProp,
   exportFolderModalOpen: exportFolderModalOpenProp,
   onSetExportFolderModalOpen: onSetExportFolderModalOpenProp,
+  layoutStyle = 'islands',
 }) => {
   const { isStopwatchActive, elapsedSeconds, remainingSeconds } = useTimer();
 
@@ -129,6 +135,19 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
       FontSize,
       LineHeight,
       Image,
+      Superscript,
+      Subscript,
+      TextColor,
+      AcademicHighlight,
+      IndentExtension,
+      Link.configure({
+        openOnClick: false,
+        autolink: true,
+        defaultProtocol: 'https',
+        HTMLAttributes: {
+          class: 'text-indigo-600 underline cursor-pointer hover:text-indigo-800',
+        },
+      }),
       TextAlign.configure({
         types: ['heading', 'paragraph', 'tableCell', 'tableHeader'],
       }),
@@ -454,19 +473,10 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
 
   return (
     <div className={`h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden relative ${isFullScreen ? 'fixed inset-0 z-50' : ''}`}>
-      {/* Barra de Herramientas Superior */}
+      {/* Barra de Herramientas Superior Académica */}
       <WriterToolbar
         editor={editor}
-        zoomLevel={zoomLevel}
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onZoomReset={handleZoomReset}
-        onZoomFit={handleZoomFit}
-        isPagedMode={isPagedMode}
-        onTogglePagedMode={() => setIsPagedMode((v) => !v)}
-        paperFormat={paperFormat}
-        onChangePaperFormat={handleChangePaperFormat}
-        pageInfo={pageInfo}
+        layoutStyle={layoutStyle}
         isFullScreen={isFullScreen}
         onToggleFullScreen={() => setIsFullScreen((v) => !v)}
         onOpenTemplates={() => setTemplatesOpen(true)}
@@ -642,8 +652,93 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
 
               .ProseMirror hr {
                 border: none;
-                border-top: 1.5px solid #e2e8f0;
+                border-top: 1.5px solid #cbd5e1;
                 margin: 1.5em 0;
+              }
+
+              .ProseMirror sup {
+                font-size: 0.75em;
+                vertical-align: super;
+                line-height: 0;
+                font-weight: 600;
+                color: #4338ca;
+              }
+
+              .ProseMirror sub {
+                font-size: 0.75em;
+                vertical-align: sub;
+                line-height: 0;
+                font-weight: 600;
+              }
+
+              .ProseMirror mark {
+                background-color: #fef08a;
+                border-radius: 3px;
+                padding: 1px 3px;
+              }
+
+              .ProseMirror a {
+                color: #2563eb;
+                text-decoration: underline;
+                cursor: pointer;
+              }
+              .ProseMirror a:hover {
+                color: #1d4ed8;
+              }
+
+              .ProseMirror code {
+                background-color: #f1f5f9;
+                color: #0f172a;
+                padding: 2px 5px;
+                border-radius: 4px;
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.9em;
+              }
+
+              .ProseMirror pre {
+                background-color: #0f172a;
+                color: #f8fafc;
+                padding: 12px 16px;
+                border-radius: 8px;
+                font-family: "JetBrains Mono", monospace;
+                font-size: 0.85em;
+                overflow-x: auto;
+                margin: 1em 0;
+              }
+
+              .ProseMirror pre code {
+                background: transparent;
+                color: inherit;
+                padding: 0;
+              }
+
+              .ProseMirror ul {
+                list-style-type: disc;
+                padding-left: 1.5em;
+                margin-bottom: 0.9em;
+              }
+
+              .ProseMirror ol {
+                list-style-type: decimal;
+                padding-left: 1.5em;
+                margin-bottom: 0.9em;
+              }
+
+              .ProseMirror li {
+                margin-bottom: 0.35em;
+              }
+
+              .ProseMirror [data-indent="1"] {
+                margin-left: 1.27cm !important;
+              }
+              .ProseMirror [data-indent="2"] {
+                margin-left: 2.54cm !important;
+              }
+              .ProseMirror [data-indent="3"] {
+                margin-left: 3.81cm !important;
+              }
+              .ProseMirror [data-indent="4"] {
+                margin-left: 5.08cm !important;
               }
 
               .ProseMirror table {
@@ -861,31 +956,22 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         />
       </div>
 
-      {/* Barra de Estado y Métricas Inferior */}
-      <footer className="h-8 border-t border-indigo-500/20 bg-slate-900/90 backdrop-blur-md px-3 sm:px-4 flex items-center justify-between text-[11px] text-slate-400 z-20 flex-shrink-0 select-none">
-        <div className="flex items-center gap-3">
+      {/* Barra de Estado y Métricas Inferior (Dock de Visualización y Escritura) */}
+      <footer className="h-9 border-t border-indigo-500/20 bg-slate-900/95 backdrop-blur-md px-2.5 sm:px-4 flex items-center justify-between text-[11px] text-slate-400 z-20 flex-shrink-0 select-none gap-2 overflow-x-auto scrollbar-none">
+        {/* Izquierda: Métricas de redacción en vivo */}
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0 min-w-0">
           <span className="font-mono text-slate-200">
-            <strong>{currentWords}</strong> palabras · <strong>{currentChars}</strong> caracteres
+            <strong>{currentWords}</strong> pal · <strong>{currentChars}</strong> car
           </span>
-          <span className="hidden sm:inline text-slate-500">|</span>
+          <span className="hidden sm:inline text-slate-600">|</span>
           <span className="hidden sm:inline font-mono">
             Ritmo: <strong>{wpm}</strong> pal/min
           </span>
-          {isPagedMode && (
-            <>
-              <span className="hidden sm:inline text-slate-500">|</span>
-              <span className="hidden sm:inline font-mono text-indigo-300">
-                Pág. {pageInfo.currentPage} de {pageInfo.pageCount} ({paperFormat === 'legal' ? 'Oficio' : paperFormat === 'a4' ? 'A4' : 'Carta'})
-              </span>
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
+          <span className="hidden md:inline text-slate-600">|</span>
           {/* Meta de palabras */}
           <div
             onClick={() => setTargetModalOpen(true)}
-            className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors"
+            className="hidden md:flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors"
             title="Ajustar meta de palabras"
           >
             <Target className="w-3.5 h-3.5 text-indigo-400" />
@@ -896,12 +982,88 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
               <span className="text-emerald-400 font-bold font-mono">({targetPct}%)</span>
             )}
           </div>
+        </div>
 
-          <span className="text-slate-500">|</span>
+        {/* Derecha: Zoom, Modo Hojas, Formato Físico de Papel y Temporizador */}
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 ml-auto">
+          {/* Controles de Zoom */}
+          <div className="flex items-center bg-slate-950/80 border border-slate-700/80 rounded-lg p-0.5 gap-0.5">
+            <button
+              type="button"
+              onClick={handleZoomOut}
+              className="h-6 w-6 flex items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+              title="Alejar zoom"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <span
+              onClick={handleZoomReset}
+              className="text-[10px] font-mono font-bold text-slate-300 px-1 cursor-pointer hover:text-white"
+              title="Restablecer a 100%"
+            >
+              {Math.round(zoomLevel * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={handleZoomIn}
+              className="h-6 w-6 flex items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+              title="Acercar zoom"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleZoomFit}
+              className="px-1.5 py-0.5 rounded text-[9.5px] font-mono font-semibold text-indigo-300 hover:text-white hover:bg-slate-800 transition-colors"
+              title="Ajustar ancho automáticamente al espacio de pantalla"
+            >
+              Ajustar
+            </button>
+          </div>
 
-          {/* Temporizador conectado */}
-          <div className="flex items-center gap-1 font-mono text-indigo-300">
-            <Clock className="w-3.5 h-3.5" />
+          {/* Switch Modo Hojas Paginadas vs Continuo */}
+          <button
+            type="button"
+            onClick={() => setIsPagedMode((v) => !v)}
+            className={`h-7 px-2 rounded-lg border text-[10.5px] font-medium flex items-center gap-1 transition-all ${
+              isPagedMode
+                ? 'bg-indigo-600/30 border-indigo-500/50 text-indigo-200 shadow-sm'
+                : 'bg-slate-950/80 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600'
+            }`}
+            title={
+              isPagedMode
+                ? 'Modo actual: Hojas físicas paginadas. Clic para modo continuo.'
+                : 'Modo actual: Lienzo continuo sin saltos. Clic para ver hojas físicas.'
+            }
+          >
+            <BookOpen className="w-3 h-3 text-indigo-400" />
+            <span className="hidden sm:inline">{isPagedMode ? 'Hojas' : 'Continuo'}</span>
+          </button>
+
+          {/* Selector de Papel Físico: Carta (216x279), Oficio (216x330), A4 (210x297) */}
+          <div className="flex items-center bg-slate-950/80 border border-slate-700/80 rounded-lg px-1.5 h-7">
+            <select
+              value={paperFormat}
+              onChange={(e) => handleChangePaperFormat(e.target.value as 'letter' | 'legal' | 'a4')}
+              className="bg-transparent text-slate-200 text-[10.5px] font-medium outline-none cursor-pointer"
+              title="Formato físico del documento y salto de página"
+            >
+              <option value="letter" className="bg-slate-900 text-white">Carta (216 × 279 mm)</option>
+              <option value="legal" className="bg-slate-900 text-white">Oficio (216 × 330 mm)</option>
+              <option value="a4" className="bg-slate-900 text-white">A4 (210 × 297 mm)</option>
+            </select>
+          </div>
+
+          {/* Indicador de Página en Modo Hojas */}
+          {isPagedMode && (
+            <span className="hidden xl:inline font-mono text-[10px] text-indigo-300 bg-indigo-950/50 border border-indigo-500/30 px-2 py-1 rounded-md">
+              Pág. {pageInfo.currentPage} de {pageInfo.pageCount}
+            </span>
+          )}
+
+          {/* Temporizador Conectado */}
+          <div className="flex items-center gap-1 font-mono text-[10.5px] text-indigo-300 bg-slate-950/80 border border-slate-800 px-2 py-1 rounded-lg">
+            <Clock className="w-3 h-3 text-indigo-400" />
             <span>
               {isStopwatchActive
                 ? `Flowtime: ${Math.floor(elapsedSeconds / 60)}m`

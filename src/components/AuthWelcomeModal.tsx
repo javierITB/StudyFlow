@@ -57,7 +57,6 @@ export const AuthWelcomeModal: React.FC<AuthWelcomeModalProps> = ({
   if (!open) return null;
 
   const handleStartSignIn = () => {
-    onDismiss();
     onOpenSignIn();
   };
 
@@ -119,11 +118,10 @@ export const AuthWelcomeModal: React.FC<AuthWelcomeModalProps> = ({
       {/* PHASE 1 & 2: MODAL AND COMPRESSING ANIMATION */}
       {phase !== 'tooltip' && (
         <div
-          className={`fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 transition-colors duration-500 ${
-            phase === 'compressing'
-              ? 'bg-slate-950/0 pointer-events-none'
-              : 'bg-slate-950/80 backdrop-blur-sm'
-          }`}
+          className={`fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 transition-colors duration-500 ${phase === 'compressing'
+            ? 'bg-slate-950/0 pointer-events-none'
+            : 'bg-slate-950/80 backdrop-blur-sm'
+            }`}
         >
           <div
             ref={cardRef}
