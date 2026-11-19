@@ -19,6 +19,7 @@ import {
   FastForward,
   Gauge,
   Globe,
+  Highlighter,
   Loader2,
   Lock,
   Maximize2,
@@ -67,6 +68,15 @@ import { formatErrorMessageEs } from '../lib/errorMessages';
 import { scheduleFsrsReview } from '../lib/fsrs';
 import { resolveActiveStrategyId } from '../lib/studyMethods';
 import { Sq3rFlowBar } from './Sq3rFlowBar';
+import { PdfDrawingToolbar } from './viewer/PdfDrawingToolbar';
+import { PdfDrawingCanvas } from './viewer/PdfDrawingCanvas';
+import {
+  DrawingStroke,
+  DrawingToolType,
+  PdfDrawingRecord,
+} from '../types/studyflow';
+import { getPdfDrawing, savePdfDrawing } from '../lib/localDb';
+import { supabase } from '../lib/supabaseClient';
 import type { DocxPage } from '../lib/docxParser';
 import type { ParsedPptxPresentation } from '../lib/pptxParser';
 import { useTimer } from '../context/TimerContext';
@@ -215,6 +225,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [viewMode, setViewMode] = useState<'single' | 'double'>('single');
   const [stickyMode, setStickyMode] = useState<boolean>(false);
   const [occlusionDrawMode, setOcclusionDrawMode] = useState<boolean>(false);
+  const [isDrawingMode, setIsDrawingMode] = useState<boolean>(false);
+  const [drawingTool, setDrawingTool] = useState<DrawingToolType>('highlighter');
+  const [drawingColor, setDrawingColor] = useState<string>('#facc15');
+  const [drawingStrokeSize, setDrawingStrokeSize] = useState<number>(18);
+  const [pageDrawings, setPageDrawings] = useState<Record<number, DrawingStroke[]>>({});
   const [activeRecallMode, setActiveRecallMode] = useState<boolean>(false);
   const [revealedNoteIds, setRevealedNoteIds] = useState<Record<string, boolean>>({});
   const [revealedOccIds, setRevealedOccIds] = useState<Record<string, boolean>>({});
@@ -546,6 +561,85 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       }
     };
   }, [activeDoc, pdfProxy, currentPage, zoom, viewMode]);
+
+  // Cargar trazos y destacados guardados para la página actual en IndexedDB
+  useEffect(() => {
+    if (!activeDoc || activeDoc.fileType !== 'pdf') return;
+    let cancelled = false;
+
+    const loadDrawings = async () => {
+      try {
+        const record = await getPdfDrawing(activeDoc.id, currentPage);
+        if (!cancelled && record) {
+          setPageDrawings((prev) => ({
+            ...prev,
+            [currentPage]: record.strokes,
+          }));
+        }
+        if (viewMode === 'double') {
+          const rec2 = await getPdfDrawing(activeDoc.id, currentPage + 1);
+          if (!cancelled && rec2) {
+            setPageDrawings((prev) => ({
+              ...prev,
+              [currentPage + 1]: rec2.strokes,
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('Error cargando trazos de PDF:', err);
+      }
+    };
+
+    void loadDrawings();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDoc?.id, currentPage, viewMode]);
+
+  const handleStrokesChange = (
+    newStrokes: DrawingStroke[],
+    targetPage: number = currentPage
+  ) => {
+    if (!activeDoc) return;
+    setPageDrawings((prev) => ({
+      ...prev,
+      [targetPage]: newStrokes,
+    }));
+
+    const drawingRecord: PdfDrawingRecord = {
+      id: `draw_${activeDoc.id}_${targetPage}`,
+      docId: activeDoc.id,
+      page: targetPage,
+      strokes: newStrokes,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      userId: currentUserId || undefined,
+    };
+
+    void savePdfDrawing(drawingRecord);
+
+    if (supabase && currentUserId) {
+      void supabase.from('pdf_drawings').upsert({
+        id: drawingRecord.id,
+        doc_id: activeDoc.id,
+        user_id: currentUserId,
+        page: targetPage,
+        strokes: newStrokes,
+        updated_at: drawingRecord.updatedAt,
+      });
+    }
+  };
+
+  const handleUndoDrawing = () => {
+    const current = pageDrawings[currentPage] || [];
+    if (current.length === 0) return;
+    handleStrokesChange(current.slice(0, current.length - 1), currentPage);
+  };
+
+  const handleClearPageDrawings = () => {
+    if (!window.confirm('¿Borrar todos los trazos y destacados de esta página?')) return;
+    handleStrokesChange([], currentPage);
+  };
 
   // Sincronizar textos iniciales de notas sin pisar notas siendo editadas
   useEffect(() => {
@@ -2619,6 +2713,30 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       {/* Area de Lectura + Controles flotantes inferiores + Panel lateral de Notas */}
       <div className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 relative flex flex-col overflow-hidden">
+          {/* Barra Flotante de Destacador y Lápiz a Mano Alzada */}
+          {isDrawingMode && activeDoc?.fileType === 'pdf' && (
+            <PdfDrawingToolbar
+              activeTool={drawingTool}
+              onSelectTool={(t) => {
+                setDrawingTool(t);
+                if (t === 'highlighter') {
+                  setDrawingColor('#facc15');
+                  setDrawingStrokeSize(18);
+                } else if (t === 'pen') {
+                  setDrawingColor('#0f172a');
+                  setDrawingStrokeSize(3);
+                }
+              }}
+              currentColor={drawingColor}
+              onSelectColor={setDrawingColor}
+              strokeSize={drawingStrokeSize}
+              onChangeStrokeSize={setDrawingStrokeSize}
+              onUndo={handleUndoDrawing}
+              canUndo={(pageDrawings[currentPage]?.length || 0) > 0}
+              onClearPage={handleClearPageDrawings}
+              onClose={() => setIsDrawingMode(false)}
+            />
+          )}
           <div
             ref={scrollContainerRef}
             onTouchStart={handleTouchStart}
@@ -2756,6 +2874,20 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     />
                   )}
 
+                  {/* Capa de Dibujo y Destacador a Mano Alzada */}
+                  {activeDoc.fileType === 'pdf' && (
+                    <PdfDrawingCanvas
+                      width={pdfDimensions.width}
+                      height={pdfDimensions.height}
+                      strokes={pageDrawings[currentPage] || []}
+                      onStrokesChange={(newStrokes) => handleStrokesChange(newStrokes, currentPage)}
+                      isDrawingMode={isDrawingMode}
+                      activeTool={drawingTool}
+                      color={drawingColor}
+                      strokeSize={drawingStrokeSize}
+                    />
+                  )}
+
                   {activeDoc.fileType === 'docx' && currentDocxPage && (
                     <div
                       className="p-10 sm:p-12 docx-sheet-content select-text transition-colors duration-200"
@@ -2823,6 +2955,20 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                             ? 'block mix-blend-multiply'
                             : 'block'
                         }
+                      />
+                    )}
+
+                    {/* Capa de Dibujo y Destacador en Segunda Hoja */}
+                    {activeDoc.fileType === 'pdf' && (
+                      <PdfDrawingCanvas
+                        width={secondaryPdfDimensions.width}
+                        height={secondaryPdfDimensions.height}
+                        strokes={pageDrawings[currentPage + 1] || []}
+                        onStrokesChange={(newStrokes) => handleStrokesChange(newStrokes, currentPage + 1)}
+                        isDrawingMode={isDrawingMode}
+                        activeTool={drawingTool}
+                        color={drawingColor}
+                        strokeSize={drawingStrokeSize}
                       />
                     )}
 
@@ -3342,6 +3488,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                       disabled={isViewerOnly}
                       onClick={() => {
                         setStickyMode(false);
+                        setIsDrawingMode(false);
                         setOcclusionDrawMode((v) => !v);
                       }}
                       title="Dibujar oclusión rectangular sobre fórmula o esquema"
@@ -3354,6 +3501,26 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                       <SquareDashedBottom className="w-3.5 h-3.5" />
                       <span className="hidden md:inline">Ocluir</span>
                     </button>
+
+                    {activeDoc.fileType === 'pdf' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStickyMode(false);
+                          setOcclusionDrawMode(false);
+                          setIsDrawingMode((v) => !v);
+                        }}
+                        title="Destacar y rayar a mano alzada en PDF (iPad / Apple Pencil o ratón)"
+                        className={`px-2 py-1 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors ${
+                          isDrawingMode
+                            ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                            : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200'
+                        }`}
+                      >
+                        <Highlighter className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="hidden md:inline">{isDrawingMode ? 'Dibujando' : 'Destacar'}</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"

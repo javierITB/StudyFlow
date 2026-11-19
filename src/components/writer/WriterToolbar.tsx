@@ -11,6 +11,7 @@ import {
   Check,
   ChevronDown,
   Code,
+  Columns,
   Divide,
   Download,
   Eraser,
@@ -20,6 +21,7 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  Heading4,
   Highlighter,
   Indent as IndentIcon,
   Italic,
@@ -35,9 +37,11 @@ import {
   Printer,
   Quote,
   Redo2,
+  Rows,
   Scissors,
   SlidersHorizontal,
   Sparkles,
+  Split,
   Strikethrough,
   Subscript as SubscriptIcon,
   Superscript as SuperscriptIcon,
@@ -46,8 +50,11 @@ import {
   Underline as UnderlineIcon,
   Undo2,
   Unlink,
+  UploadCloud,
 } from 'lucide-react';
 import { LayoutStyleId } from '../../types/studyflow';
+import { parseMarkdownToHtml } from '../../lib/markdownParser';
+import { sanitizeAndPaginateOversizedNodes } from '../../lib/tiptap/CustomTableExtensions';
 
 interface WriterToolbarProps {
   editor: Editor | null;
@@ -55,6 +62,7 @@ interface WriterToolbarProps {
   isFullScreen: boolean;
   onToggleFullScreen: () => void;
   onOpenTemplates: () => void;
+  onPublishTemplate?: () => void;
   onBackToHub?: () => void;
   onToggleCitations: () => void;
   citationsOpen: boolean;
@@ -117,6 +125,7 @@ type ActiveDropdown =
   | 'moreFormat'
   | 'color'
   | 'paragraph'
+  | 'lineHeight'
   | 'insert'
   | 'export'
   | 'link'
@@ -128,6 +137,7 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
   isFullScreen,
   onToggleFullScreen,
   onOpenTemplates,
+  onPublishTemplate,
   onBackToHub,
   onToggleCitations,
   citationsOpen,
@@ -178,8 +188,11 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
   const isH1 = editor.isActive('heading', { level: 1 });
   const isH2 = editor.isActive('heading', { level: 2 });
   const isH3 = editor.isActive('heading', { level: 3 });
+  const isH4 = editor.isActive('heading', { level: 4 });
   const isBlockquote = editor.isActive('blockquote');
   const isCodeBlock = editor.isActive('codeBlock');
+  const isOrderedList = editor.isActive('orderedList');
+  const isBulletList = editor.isActive('bulletList');
 
   const currentStyleLabel = isH1
     ? 'Título 1'
@@ -187,11 +200,61 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
     ? 'Título 2'
     : isH3
     ? 'Título 3'
+    : isH4
+    ? 'Título 4'
     : isBlockquote
     ? 'Cita bloque'
     : isCodeBlock
     ? 'Código'
+    : isOrderedList
+    ? 'Numeración'
+    : isBulletList
+    ? 'Viñetas'
     : 'Texto normal';
+
+  const handleSmartToggleOrderedList = () => {
+    const { from, to, empty } = editor.state.selection;
+    if (!empty) {
+      const selectedText = editor.state.doc.textBetween(from, to, '\n');
+      if (/^\s*\d+[\.\)]\s+/m.test(selectedText)) {
+        const cleaned = selectedText
+          .split('\n')
+          .map((line) => line.replace(/^\s*\d+[\.\)]\s+/, ''))
+          .join('\n');
+        editor
+          .chain()
+          .focus()
+          .insertContentAt({ from, to }, cleaned)
+          .setTextSelection({ from, to: from + cleaned.length })
+          .toggleOrderedList()
+          .run();
+        return;
+      }
+    }
+    editor.chain().focus().toggleOrderedList().run();
+  };
+
+  const handleSmartToggleBulletList = () => {
+    const { from, to, empty } = editor.state.selection;
+    if (!empty) {
+      const selectedText = editor.state.doc.textBetween(from, to, '\n');
+      if (/^\s*[-*•]\s+/m.test(selectedText)) {
+        const cleaned = selectedText
+          .split('\n')
+          .map((line) => line.replace(/^\s*[-*•]\s+/, ''))
+          .join('\n');
+        editor
+          .chain()
+          .focus()
+          .insertContentAt({ from, to }, cleaned)
+          .setTextSelection({ from, to: from + cleaned.length })
+          .toggleBulletList()
+          .run();
+        return;
+      }
+    }
+    editor.chain().focus().toggleBulletList().run();
+  };
 
   const changeCase = (mode: 'upper' | 'lower') => {
     const { from, to, empty } = editor.state.selection;
@@ -373,6 +436,25 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
                   </span>
                 </div>
                 {isH3 && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  editor.chain().focus().toggleHeading({ level: 4 }).run();
+                  closeDropdown();
+                }}
+                className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center justify-between ${
+                  isH4 ? 'bg-indigo-600/30 text-indigo-200' : 'hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Heading4 className="w-4 h-4 text-teal-400" />
+                  <span className={showRichPreviews ? 'text-xs font-medium text-slate-300' : 'text-xs'}>
+                    Título 4 (H4)
+                  </span>
+                </div>
+                {isH4 && <Check className="w-3.5 h-3.5 text-indigo-400" />}
               </button>
 
               <div className="h-px bg-slate-800 my-1" />
@@ -709,7 +791,7 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
 
         <span className="w-px h-5 bg-slate-700/60 mx-0.5" />
 
-        {/* 7. Submenú de Párrafo: Alineación, Interlineado, Listas y Sangría APA */}
+        {/* 7. Alineación de Párrafo */}
         <div className="relative">
           <button
             type="button"
@@ -719,7 +801,7 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
                 ? 'bg-slate-800 border-indigo-400 text-white'
                 : 'bg-slate-950/80 border-slate-700/80 hover:border-slate-600 text-slate-200'
             }`}
-            title="Alineación, interlineado, listas y sangría APA"
+            title="Alineación de párrafo"
           >
             {editor.isActive({ textAlign: 'center' }) ? (
               <AlignCenter className="w-3.5 h-3.5 text-indigo-400" />
@@ -730,7 +812,7 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
             ) : (
               <AlignLeft className="w-3.5 h-3.5 text-indigo-400" />
             )}
-            <span className="hidden sm:inline">Párrafo</span>
+            <span className="hidden sm:inline">Alinear</span>
             <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
           </button>
 
@@ -744,7 +826,10 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
                 <div className="grid grid-cols-4 gap-1 p-0.5 bg-slate-950 rounded-lg border border-slate-800">
                   <button
                     type="button"
-                    onClick={() => editor.chain().focus().setTextAlign('left').run()}
+                    onClick={() => {
+                      editor.chain().focus().setTextAlign('left').run();
+                      closeDropdown();
+                    }}
                     className={`py-1.5 flex items-center justify-center rounded transition-colors ${
                       editor.isActive({ textAlign: 'left' })
                         ? 'bg-indigo-600 text-white shadow-sm'
@@ -756,7 +841,10 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => editor.chain().focus().setTextAlign('center').run()}
+                    onClick={() => {
+                      editor.chain().focus().setTextAlign('center').run();
+                      closeDropdown();
+                    }}
                     className={`py-1.5 flex items-center justify-center rounded transition-colors ${
                       editor.isActive({ textAlign: 'center' })
                         ? 'bg-indigo-600 text-white shadow-sm'
@@ -768,7 +856,10 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => editor.chain().focus().setTextAlign('right').run()}
+                    onClick={() => {
+                      editor.chain().focus().setTextAlign('right').run();
+                      closeDropdown();
+                    }}
                     className={`py-1.5 flex items-center justify-center rounded transition-colors ${
                       editor.isActive({ textAlign: 'right' })
                         ? 'bg-indigo-600 text-white shadow-sm'
@@ -780,7 +871,10 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => editor.chain().focus().setTextAlign('justify').run()}
+                    onClick={() => {
+                      editor.chain().focus().setTextAlign('justify').run();
+                      closeDropdown();
+                    }}
                     className={`py-1.5 flex items-center justify-center rounded transition-colors ${
                       editor.isActive({ textAlign: 'justify' })
                         ? 'bg-indigo-600 text-white shadow-sm'
@@ -792,99 +886,100 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
                   </button>
                 </div>
               </div>
-
-              <div className="h-px bg-slate-800" />
-
-              {/* Interlineado */}
-              <div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Interlineado
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {LINE_HEIGHTS.map((lh) => {
-                    const isSelected = currentLineHeight === lh.value;
-                    return (
-                      <button
-                        key={lh.value}
-                        type="button"
-                        onClick={() => {
-                          editor.chain().focus().setLineHeight(lh.value).run();
-                          closeDropdown();
-                        }}
-                        className={`px-2 py-1.5 rounded-lg text-xs font-medium text-left flex items-center justify-between border ${
-                          isSelected
-                            ? 'bg-indigo-600/30 border-indigo-500/50 text-indigo-200'
-                            : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white'
-                        }`}
-                      >
-                        <span className="truncate">{lh.label}</span>
-                        {isSelected && <Check className="w-3 h-3 text-indigo-400 flex-shrink-0" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="h-px bg-slate-800" />
-
-              {/* Listas y Sangría APA */}
-              <div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Listas y Sangría APA
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      editor.chain().focus().toggleBulletList().run();
-                      closeDropdown();
-                    }}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-2 border ${
-                      editor.isActive('bulletList')
-                        ? 'bg-indigo-600 text-white border-indigo-500'
-                        : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white'
-                    }`}
-                  >
-                    <List className="w-3.5 h-3.5" />
-                    <span>Viñetas</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      editor.chain().focus().toggleOrderedList().run();
-                      closeDropdown();
-                    }}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-2 border ${
-                      editor.isActive('orderedList')
-                        ? 'bg-indigo-600 text-white border-indigo-500'
-                        : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white'
-                    }`}
-                  >
-                    <ListOrdered className="w-3.5 h-3.5" />
-                    <span>Numerada</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => editor.chain().focus().outdent().run()}
-                    className="px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-2 bg-slate-950/70 border border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white"
-                    title="Reducir sangría"
-                  >
-                    <OutdentIcon className="w-3.5 h-3.5" />
-                    <span>Reducir</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => editor.chain().focus().indent().run()}
-                    className="px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-2 bg-slate-950/70 border border-slate-800 text-indigo-300 hover:bg-indigo-600/30 hover:text-white"
-                    title="Aumentar sangría APA (1.27 cm)"
-                  >
-                    <IndentIcon className="w-3.5 h-3.5" />
-                    <span>Sangría APA</span>
-                  </button>
-                </div>
-              </div>
             </div>
           )}
+        </div>
+
+        {/* 8. Interlineado Directo */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => toggleDropdown('lineHeight')}
+            className={`h-7 px-2 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition-colors shadow-sm ${
+              activeDropdown === 'lineHeight'
+                ? 'bg-slate-800 border-indigo-400 text-white'
+                : 'bg-slate-950/80 border-slate-700/80 hover:border-slate-600 text-slate-200'
+            }`}
+            title="Interlineado del documento (Simple, 1.15, 1.5, Doble APA)"
+          >
+            <span className="text-indigo-400 font-bold font-mono text-[11px]">↕</span>
+            <span className="font-mono text-xs">{currentLineHeight || '1.15'}</span>
+            <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
+          </button>
+
+          {activeDropdown === 'lineHeight' && (
+            <div className="absolute top-8 left-0 z-50 w-52 p-2 rounded-xl bg-slate-900 border border-slate-700/90 shadow-2xl space-y-1 fade-in text-slate-200">
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-0.5">
+                Interlineado
+              </div>
+              {LINE_HEIGHTS.map((lh) => {
+                const isSelected = (currentLineHeight || '1.15') === lh.value;
+                return (
+                  <button
+                    key={lh.value}
+                    type="button"
+                    onClick={() => {
+                      editor.chain().focus().setLineHeight(lh.value).run();
+                      closeDropdown();
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between ${
+                      isSelected
+                        ? 'bg-indigo-600/30 text-indigo-200 font-semibold'
+                        : 'hover:bg-slate-800'
+                    }`}
+                  >
+                    <span>{lh.label}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 9. Listas y Sangría APA Directas */}
+        <div className="flex items-center bg-slate-950/80 border border-slate-700/80 rounded-lg p-0.5 gap-0.5 shadow-sm">
+          <button
+            type="button"
+            onClick={handleSmartToggleBulletList}
+            className={`h-6 w-6 flex items-center justify-center rounded transition-colors ${
+              editor.isActive('bulletList')
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Lista con viñetas"
+          >
+            <List className="w-3.5 h-3.5 text-emerald-400" />
+          </button>
+          <button
+            type="button"
+            onClick={handleSmartToggleOrderedList}
+            className={`h-6 w-6 flex items-center justify-center rounded transition-colors ${
+              editor.isActive('orderedList')
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Lista numerada continua (1, 2, 3...)"
+          >
+            <ListOrdered className="w-3.5 h-3.5 text-emerald-400" />
+          </button>
+          <span className="w-px h-3.5 bg-slate-700/60" />
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().outdent().run()}
+            className="h-6 w-6 flex items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+            title="Reducir sangría"
+          >
+            <OutdentIcon className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().indent().run()}
+            className="h-6 w-6 flex items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+            title="Aumentar sangría APA (1.27 cm)"
+          >
+            <IndentIcon className="w-3.5 h-3.5 text-indigo-400" />
+          </button>
         </div>
 
         {/* 8. Submenú de Inserción: Tabla (6x6 interactiva), Enlace, Salto de página, Regla */}
@@ -941,46 +1036,165 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
 
                 {/* Controles contextuales de tabla activa */}
                 {editor.isActive('table') && (
-                  <div className="mt-2 pt-2 border-t border-slate-800 grid grid-cols-4 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => editor.chain().focus().addRowAfter().run()}
-                      disabled={!editor.can().addRowAfter()}
-                      className="py-1 px-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 flex items-center justify-center gap-0.5"
-                      title="Añadir fila abajo"
-                    >
-                      <PlusSquare className="w-3 h-3 text-emerald-400" /> Fila
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => editor.chain().focus().deleteRow().run()}
-                      disabled={!editor.can().deleteRow()}
-                      className="py-1 px-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-rose-300 flex items-center justify-center gap-0.5"
-                      title="Eliminar fila"
-                    >
-                      <MinusSquare className="w-3 h-3 text-rose-400" /> Fila
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => editor.chain().focus().addColumnAfter().run()}
-                      disabled={!editor.can().addColumnAfter()}
-                      className="py-1 px-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 flex items-center justify-center gap-0.5"
-                      title="Añadir columna derecha"
-                    >
-                      <ArrowRightSquare className="w-3 h-3 text-emerald-400" /> Col
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        editor.chain().focus().deleteTable().run();
-                        closeDropdown();
-                      }}
-                      disabled={!editor.can().deleteTable()}
-                      className="py-1 px-1 rounded bg-rose-900/40 hover:bg-rose-900/60 text-[10px] text-rose-300 flex items-center justify-center gap-0.5"
-                      title="Eliminar tabla completa"
-                    >
-                      <Trash2 className="w-3 h-3 text-rose-400" /> Borrar
-                    </button>
+                  <div className="mt-2 pt-2 border-t border-slate-800 space-y-2">
+                    <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">
+                      Ajustes de Tabla
+                    </span>
+
+                    {/* Fila 1: Filas y Columnas básicas */}
+                    <div className="grid grid-cols-4 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => editor.chain().focus().addRowAfter().run()}
+                        disabled={!editor.can().addRowAfter()}
+                        className="py-1 px-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 flex items-center justify-center gap-0.5 cursor-pointer"
+                        title="Añadir fila abajo"
+                      >
+                        <PlusSquare className="w-3 h-3 text-emerald-400" /> Fila
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => editor.chain().focus().deleteRow().run()}
+                        disabled={!editor.can().deleteRow()}
+                        className="py-1 px-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-rose-300 flex items-center justify-center gap-0.5 cursor-pointer"
+                        title="Eliminar fila"
+                      >
+                        <MinusSquare className="w-3 h-3 text-rose-400" /> Fila
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => editor.chain().focus().addColumnAfter().run()}
+                        disabled={!editor.can().addColumnAfter()}
+                        className="py-1 px-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 flex items-center justify-center gap-0.5 cursor-pointer"
+                        title="Añadir columna derecha"
+                      >
+                        <ArrowRightSquare className="w-3 h-3 text-emerald-400" /> Col
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          editor.chain().focus().deleteTable().run();
+                          closeDropdown();
+                        }}
+                        disabled={!editor.can().deleteTable()}
+                        className="py-1 px-1 rounded bg-rose-900/40 hover:bg-rose-900/60 text-[10px] text-rose-300 flex items-center justify-center gap-0.5 cursor-pointer"
+                        title="Eliminar tabla completa"
+                      >
+                        <Trash2 className="w-3 h-3 text-rose-400" /> Borrar
+                      </button>
+                    </div>
+
+                    {/* Fila 2: Dimensiones de celda (ancho col y alto fila) */}
+                    <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-800/60">
+                      <div className="flex items-center justify-between bg-slate-950 p-1 rounded border border-slate-800 text-[10px]">
+                        <span className="text-slate-400 flex items-center gap-1">
+                          <Columns className="w-3 h-3 text-cyan-400" /> Col
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cell = editor.getAttributes('tableCell') || editor.getAttributes('tableHeader');
+                              const cur = cell?.colwidth?.[0] || 130;
+                              editor.chain().focus().setColumnWidth(Math.max(40, cur - 15)).run();
+                            }}
+                            className="w-4 h-4 bg-slate-800 hover:bg-slate-700 rounded text-center leading-none text-slate-200"
+                            title="Reducir ancho columna"
+                          >
+                            -
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cell = editor.getAttributes('tableCell') || editor.getAttributes('tableHeader');
+                              const cur = cell?.colwidth?.[0] || 130;
+                              editor.chain().focus().setColumnWidth(cur + 15).run();
+                            }}
+                            className="w-4 h-4 bg-slate-800 hover:bg-slate-700 rounded text-center leading-none text-slate-200"
+                            title="Aumentar ancho columna"
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => editor.chain().focus().distributeColumnsEvenly().run()}
+                            className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] text-cyan-300"
+                            title="Distribuir columnas uniformemente"
+                          >
+                            Dist
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between bg-slate-950 p-1 rounded border border-slate-800 text-[10px]">
+                        <span className="text-slate-400 flex items-center gap-1">
+                          <Rows className="w-3 h-3 text-amber-400" /> Fila
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const row = editor.getAttributes('tableRow');
+                              const cur = row?.height ? parseInt(row.height, 10) : 36;
+                              editor.chain().focus().setTableRowHeight(`${Math.max(20, cur - 4)}px`).run();
+                            }}
+                            className="w-4 h-4 bg-slate-800 hover:bg-slate-700 rounded text-center leading-none text-slate-200"
+                            title="Reducir alto de fila"
+                          >
+                            -
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const row = editor.getAttributes('tableRow');
+                              const cur = row?.height ? parseInt(row.height, 10) : 36;
+                              editor.chain().focus().setTableRowHeight(`${cur + 4}px`).run();
+                            }}
+                            className="w-4 h-4 bg-slate-800 hover:bg-slate-700 rounded text-center leading-none text-slate-200"
+                            title="Aumentar alto de fila"
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => editor.chain().focus().setTableRowHeight(null).run()}
+                            className="px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] text-amber-300"
+                            title="Restablecer alto automático"
+                          >
+                            Auto
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Fila 3: Paginación y corte de tabla para proteger el tamaño de hoja */}
+                    <div className="space-y-1 pt-1 border-t border-slate-800/60">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          editor.chain().focus().splitTableAtCursor(true).run();
+                          closeDropdown();
+                        }}
+                        className="w-full text-left px-2 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 text-[10px] flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Corta la tabla en la fila actual y la envía a la siguiente página repitiendo el encabezado"
+                      >
+                        <Scissors className="w-3 h-3 text-indigo-400" />
+                        <span>Dividir tabla aquí (nueva página)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          editor.chain().focus().autoPaginateTable(15).run();
+                          closeDropdown();
+                        }}
+                        className="w-full text-left px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Divide automáticamente la tabla en páginas de hasta 15 filas respetando el tamaño físico de hoja"
+                      >
+                        <Split className="w-3 h-3 text-emerald-400" />
+                        <span>Auto-paginar tabla larga (15 filas)</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -998,6 +1212,38 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
                 {editor.isActive('link') && (
                   <span className="text-[10px] text-cyan-400 font-mono">Activo</span>
                 )}
+              </button>
+
+              {/* Pegar código Markdown directamente */}
+              <button
+                type="button"
+                onClick={async () => {
+                  closeDropdown();
+                  try {
+                    const text = await navigator.clipboard.readText();
+                    if (text && text.trim()) {
+                      const parsed = parseMarkdownToHtml(text);
+                      if (parsed && parsed !== '<p></p>') {
+                        editor.chain().focus().insertContent(parsed).run();
+                        setTimeout(() => {
+                          sanitizeAndPaginateOversizedNodes(editor);
+                        }, 60);
+                        return;
+                      }
+                    }
+                  } catch {
+                    // Si el navegador bloquea clipboard.readText(), enfocar y usar atajo nativo
+                  }
+                  editor.chain().focus().run();
+                }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Pega e interpreta código Markdown desde el portapapeles directamente en la zona de redacción"
+              >
+                <div className="flex items-center gap-2">
+                  <FileCode className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Pegar Markdown del portapapeles</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-mono">Ctrl+V</span>
               </button>
 
               {/* Salto de Página */}
@@ -1080,9 +1326,22 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* SECCIÓN DERECHA: PLANTILLAS, CITAS, A LECTURAS, EXPORTAR Y ESTADO */}
+      {/* SECCIÓN DERECHA: PUBLICAR, PLANTILLAS, CITAS, A LECTURAS, EXPORTAR Y ESTADO */}
       {/* ========================================================================= */}
       <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0 ml-auto">
+        {/* Publicar en la Comunidad */}
+        {onPublishTemplate && (
+          <button
+            type="button"
+            onClick={onPublishTemplate}
+            className="h-7 px-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/35 hover:bg-emerald-500/25 text-emerald-300 hover:text-emerald-200 text-[11px] font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+            title="Publicar este documento como plantilla pública en la comunidad"
+          >
+            <UploadCloud className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden lg:inline">Publicar</span>
+          </button>
+        )}
+
         {/* Plantillas Guiadas */}
         <button
           type="button"

@@ -10,6 +10,7 @@ import {
   Sparkles,
   Target,
   Trash2,
+  UploadCloud,
 } from 'lucide-react';
 import { StudyWorkDraft, UserProfile } from '../../types/studyflow';
 
@@ -21,6 +22,7 @@ interface WorksSidebarProps {
   onDeleteWork: (id: string) => void;
   onCloseDrawer?: () => void;
   onOpenTemplates: () => void;
+  onOpenImportModal?: () => void;
   onExportToReadings: (work: StudyWorkDraft) => void;
   user?: UserProfile | null;
   onOpenAccountModal?: () => void;
@@ -35,6 +37,7 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
   onDeleteWork,
   onCloseDrawer,
   onOpenTemplates,
+  onOpenImportModal,
   onExportToReadings,
   user,
   onOpenAccountModal,
@@ -77,22 +80,33 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
 
       {/* Acciones principales y Búsqueda */}
       <div className="p-3 border-b border-indigo-500/20 space-y-2 bg-slate-900/60">
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="grid grid-cols-3 gap-1.5">
           <button
             type="button"
             onClick={onCreateNewWork}
-            className="py-2 px-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+            title="Nuevo trabajo en blanco"
+            className="py-2 px-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold flex items-center justify-center gap-1 shadow-sm transition-colors"
           >
-            <FilePlus className="w-3.5 h-3.5" />
-            <span>Nuevo Trabajo</span>
+            <FilePlus className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Nuevo</span>
+          </button>
+          <button
+            type="button"
+            onClick={onOpenImportModal}
+            title="Importar archivo (.md, .docx, .pdf, .pptx)"
+            className="py-2 px-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/35 text-indigo-200 text-[11px] font-semibold flex items-center justify-center gap-1 transition-colors"
+          >
+            <UploadCloud className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <span className="truncate">Importar</span>
           </button>
           <button
             type="button"
             onClick={onOpenTemplates}
-            className="py-2 px-2.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/35 text-indigo-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+            title="Galería de plantillas académicas"
+            className="py-2 px-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/35 text-indigo-200 text-[11px] font-semibold flex items-center justify-center gap-1 transition-colors"
           >
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Plantillas</span>
+            <Sparkles className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <span className="truncate">Plantillas</span>
           </button>
         </div>
 

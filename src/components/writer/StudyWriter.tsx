@@ -6,7 +6,7 @@ import { TextAlign } from '@tiptap/extension-text-align';
 import { Image } from '@tiptap/extension-image';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { FontFamily } from '@tiptap/extension-font-family';
-import { CustomTable, CustomTableRow, CustomTableCell, CustomTableHeader, LineHeight } from '../../lib/tiptap/CustomTableExtensions';
+import { CustomTable, CustomTableRow, CustomTableCell, CustomTableHeader, LineHeight, sanitizeAndPaginateOversizedNodes } from '../../lib/tiptap/CustomTableExtensions';
 import { PageBreak } from '../../lib/tiptap/PageBreak';
 import { FontSize } from '../../lib/tiptap/fontSize';
 import { AutoPaginationExtension } from '../../lib/tiptap/AutoPaginationExtension';
@@ -15,10 +15,24 @@ import { TextColor, AcademicHighlight } from '../../lib/tiptap/AcademicColorExte
 import { IndentExtension } from '../../lib/tiptap/IndentExtension';
 import Link from '@tiptap/extension-link';
 import { WriterToolbar } from './WriterToolbar';
+import { FloatingFormatMenu } from './FloatingFormatMenu';
+import { TableControlBar } from './TableControlBar';
 import { CitationsDrawer } from './CitationsDrawer';
 import { AcademicTemplatesModal, AcademicTemplate, ACADEMIC_TEMPLATES } from './AcademicTemplatesModal';
 import { TemplatesWelcomeHub } from './TemplatesWelcomeHub';
-import { DocumentRecord, FolderRecord, LayoutStyleId, StickyNoteRecord, StudyWorkDraft } from '../../types/studyflow';
+import { PublishTemplateModal } from './PublishTemplateModal';
+import { ImportDocumentModal } from './ImportDocumentModal';
+import { FloatingImportProgress } from './FloatingImportProgress';
+import { prepareDocumentImport, ImportProgressState } from '../../lib/documentImportEngine';
+import { AcademicStyleProfile, parseMarkdownToHtml, isMarkdownContent } from '../../lib/markdownParser';
+import {
+  CommunityTemplateRecord,
+  DocumentRecord,
+  FolderRecord,
+  LayoutStyleId,
+  StickyNoteRecord,
+  StudyWorkDraft,
+} from '../../types/studyflow';
 import { exportHtmlToDocx, exportHtmlToMarkdown, exportHtmlToPdf, printFormattedDocument } from '../../lib/docxExport';
 import { BookOpen, Clock, Expand, FileText, Target, ZoomIn, ZoomOut } from 'lucide-react';
 import { useTimer } from '../../context/TimerContext';
@@ -37,9 +51,13 @@ interface StudyWriterProps {
   onNotify: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
   templatesOpen?: boolean;
   onSetTemplatesOpen?: (open: boolean) => void;
+  importModalOpen?: boolean;
+  onSetImportModalOpen?: (open: boolean) => void;
   exportFolderModalOpen?: boolean;
   onSetExportFolderModalOpen?: (open: boolean) => void;
   layoutStyle?: LayoutStyleId;
+  currentUser?: { id: string; name?: string; username?: string | null } | null;
+  onOpenAccountModal?: () => void;
 }
 
 export const StudyWriter: React.FC<StudyWriterProps> = ({
@@ -56,9 +74,13 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   onNotify,
   templatesOpen: templatesOpenProp,
   onSetTemplatesOpen: onSetTemplatesOpenProp,
+  importModalOpen: importModalOpenProp,
+  onSetImportModalOpen: onSetImportModalOpenProp,
   exportFolderModalOpen: exportFolderModalOpenProp,
   onSetExportFolderModalOpen: onSetExportFolderModalOpenProp,
   layoutStyle = 'islands',
+  currentUser,
+  onOpenAccountModal,
 }) => {
   const { isStopwatchActive, elapsedSeconds, remainingSeconds } = useTimer();
 
@@ -93,6 +115,13 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   const setTemplatesOpen = onSetTemplatesOpenProp ?? setInternalTemplatesOpen;
 
   const [targetModalOpen, setTargetModalOpen] = useState<boolean>(false);
+  const [publishModalOpen, setPublishModalOpen] = useState<boolean>(false);
+  const [internalImportModalOpen, setInternalImportModalOpen] = useState<boolean>(false);
+  const isImportModalOpen = importModalOpenProp !== undefined ? importModalOpenProp : internalImportModalOpen;
+  const setIsImportModalOpen = onSetImportModalOpenProp ?? setInternalImportModalOpen;
+  const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
+  const [droppedImportFile, setDroppedImportFile] = useState<File | null>(null);
+
   const [internalExportModalOpen, setInternalExportModalOpen] = useState<boolean>(false);
   const exportFolderModalOpen =
     exportFolderModalOpenProp !== undefined
@@ -109,6 +138,9 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
 
   // Referencia al contenedor de trabajo para ajuste dinámico de zoom (Fit to Screen)
   const workspaceContainerRef = useRef<HTMLDivElement>(null);
+
+  // Referencia a editor para inserción asíncrona de bloques en segundo plano
+  const editorRef = useRef<any>(null);
 
   // Refs actualizadas para evitar cierres obsoletos dentro de TipTap onUpdate
   const activeWorkRef = useRef<StudyWorkDraft | null>(activeWork);
@@ -164,6 +196,42 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         },
       }),
     ],
+    editorProps: {
+      handlePaste(_view, event) {
+        const clipboardData = event.clipboardData;
+        if (!clipboardData) return false;
+
+        const text = clipboardData.getData('text/plain');
+        if (!text || !text.trim()) return false;
+
+        const html = clipboardData.getData('text/html');
+
+        // Detectar si el texto contiene sintaxis y estructura de Markdown (#, ```, |, >, listas, etc.)
+        if (isMarkdownContent(text)) {
+          // Si el HTML trae estructura semántica rica real (h1, table, ul, blockquote)
+          // y NO contiene caracteres de Markdown crudos como # o ```, respetamos el HTML nativo.
+          const hasRichHtmlStructure =
+            Boolean(html) &&
+            /<(h[1-6]|table|ul|ol|blockquote)[\s>]/i.test(html) &&
+            !/(^|\n)#{1,6}\s+|```/m.test(html);
+
+          if (!hasRichHtmlStructure) {
+            event.preventDefault();
+            const parsed = parseMarkdownToHtml(text);
+            if (parsed && parsed !== '<p></p>') {
+              editorRef.current?.commands.insertContent(parsed);
+              setTimeout(() => {
+                if (editorRef.current) {
+                  sanitizeAndPaginateOversizedNodes(editorRef.current);
+                }
+              }, 60);
+              return true;
+            }
+          }
+        }
+        return false;
+      },
+    },
     content: activeWork?.contentHtml || '<p>Comienza a redactar tu trabajo...</p>',
     onUpdate: ({ editor }) => {
       const text = editor.getText();
@@ -185,6 +253,17 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
       }
     },
   });
+
+  editorRef.current = editor;
+
+  // Sanear tablas y bloques de código extensos al montar el editor
+  useEffect(() => {
+    if (editor) {
+      setTimeout(() => {
+        sanitizeAndPaginateOversizedNodes(editor);
+      }, 100);
+    }
+  }, [editor]);
 
   // Sincronizar formato de papel con la extensión
   useEffect(() => {
@@ -224,6 +303,11 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         sessionStartWordsRef.current = words;
         sessionStartTimeRef.current = Date.now();
         setSessionWordsWritten(0);
+        setTimeout(() => {
+          if (editor) {
+            sanitizeAndPaginateOversizedNodes(editor);
+          }
+        }, 80);
       }
     }
   }, [activeWork?.id, editor]);
@@ -449,6 +533,142 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
     [onCreateNewWork, onNotify, onSaveWork, onSelectWork]
   );
 
+  // Selección de plantilla comunitaria desde el Hub
+  const handleSelectCommunityTemplateFromHub = useCallback(
+    async (tmpl: CommunityTemplateRecord) => {
+      if (isCreatingRef.current) return;
+      isCreatingRef.current = true;
+      setIsCreatingWork(true);
+      setCreatingTemplateId(tmpl.id);
+
+      try {
+        const text = tmpl.contentText || tmpl.contentHtml.replace(/<[^>]*>/g, ' ').trim();
+        const words = text ? text.split(/\s+/).length : 0;
+        const newWork: StudyWorkDraft = {
+          id: `work_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          title: tmpl.title,
+          contentHtml: tmpl.contentHtml,
+          contentText: text,
+          wordCount: words,
+          targetWordCount: tmpl.targetWords,
+          paperSize: tmpl.paperSize || 'letter',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await onSaveWork(newWork);
+        onSelectWork?.(newWork.id);
+        onNotify(`Plantilla comunitaria "${tmpl.title}" cargada`, 'success');
+      } catch {
+        onNotify('No se pudo crear el trabajo desde la plantilla', 'error');
+      } finally {
+        setIsCreatingWork(false);
+        setCreatingTemplateId(null);
+        isCreatingRef.current = false;
+      }
+    },
+    [onNotify, onSaveWork, onSelectWork]
+  );
+
+  // Manejo de importación progresiva por bloques (.md, .docx, .pdf, .pptx, .txt)
+  const handleConfirmImport = async (
+    file: File,
+    options: {
+      title: string;
+      profile: AcademicStyleProfile;
+      paperSize: 'letter' | 'legal' | 'a4';
+    }
+  ) => {
+    setIsImportModalOpen(false);
+    setDroppedImportFile(null);
+
+    try {
+      const prepared = await prepareDocumentImport(file, {
+        profile: options.profile,
+        paperSize: options.paperSize,
+        title: options.title,
+        onProgress: (p) => setImportProgress(p),
+      });
+
+      const newWorkId = `work_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const text = prepared.initialBlockHtml.replace(/<[^>]*>/g, ' ').trim();
+      const words = text ? text.split(/\s+/).length : 0;
+
+      const newWork: StudyWorkDraft = {
+        id: newWorkId,
+        title: prepared.title,
+        contentHtml: prepared.initialBlockHtml,
+        contentText: text,
+        wordCount: words,
+        targetWordCount: prepared.totalEstimatedWords || 1000,
+        paperSize: prepared.paperSize,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await onSaveWork(newWork);
+      onSelectWork?.(newWork.id);
+      onNotify(`Documento "${prepared.title}" iniciado en Redacción`, 'success');
+
+      // Si el documento cuenta con bloques adicionales, transmitirlos en streaming progresivo
+      if (prepared.remainingBlocks && prepared.remainingBlocks.length > 0) {
+        let currentHtml = prepared.initialBlockHtml;
+        const total = prepared.totalBlocks;
+
+        setTimeout(async () => {
+          for (let b = 0; b < prepared.remainingBlocks.length; b++) {
+            await new Promise((r) => setTimeout(r, 200));
+            const blockHtml = prepared.remainingBlocks[b];
+            currentHtml += '\n' + blockHtml;
+            const blockWords = currentHtml.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).length;
+
+            const updated: StudyWorkDraft = {
+              ...newWork,
+              contentHtml: currentHtml,
+              contentText: currentHtml.replace(/<[^>]*>/g, ' ').trim(),
+              wordCount: blockWords,
+              updatedAt: new Date().toISOString(),
+            };
+            await onSaveWork(updated);
+
+            // Inyectar al final del editor TipTap sin interferir con el cursor del usuario
+            if (editorRef.current && activeWorkRef.current?.id === newWorkId) {
+              const docSize = editorRef.current.state.doc.content.size;
+              editorRef.current.commands.insertContentAt(docSize, blockHtml);
+            }
+
+            setImportProgress({
+              fileName: prepared.fileName,
+              fileType: prepared.fileType,
+              percent: Math.round(((b + 2) / total) * 100),
+              currentBlock: b + 2,
+              totalBlocks: total,
+              statusText:
+                b + 2 >= total
+                  ? 'Documento interpretado al 100%'
+                  : `Interpretando bloque ${b + 2} de ${total}...`,
+              isComplete: b + 2 >= total,
+            });
+          }
+
+          onNotify('¡Importación completada al 100%!', 'success');
+        }, 300);
+      }
+    } catch (err: any) {
+      console.error('Error al importar documento:', err);
+      setImportProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              isComplete: true,
+              error: err.message,
+              statusText: 'Error al interpretar archivo',
+            }
+          : null
+      );
+      onNotify(err.message || 'No se pudo importar el documento', 'error');
+    }
+  };
+
   // Si no hay trabajo activo seleccionado, renderizar Hub de Bienvenida y Plantillas
   if (!activeWork) {
     return (
@@ -460,10 +680,32 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         <TemplatesWelcomeHub
           works={works}
           onSelectTemplate={handleSelectTemplateFromHub}
+          onSelectCommunityTemplate={handleSelectCommunityTemplateFromHub}
           onOpenWork={(id) => onSelectWork?.(id)}
           onDeleteWork={onDeleteWork}
+          onOpenImportModal={() => setIsImportModalOpen(true)}
           isCreating={isCreatingWork}
           creatingTemplateId={creatingTemplateId}
+          currentUserId={currentUser?.id}
+          onOpenAuthModal={onOpenAccountModal}
+          onNotify={onNotify}
+        />
+
+        {/* Modal de Importación Progresiva */}
+        <ImportDocumentModal
+          isOpen={isImportModalOpen}
+          onClose={() => {
+            setIsImportModalOpen(false);
+            setDroppedImportFile(null);
+          }}
+          droppedFile={droppedImportFile}
+          onConfirmImport={handleConfirmImport}
+        />
+
+        {/* Notificación Flotante de Progreso en Esquina Inferior Derecha */}
+        <FloatingImportProgress
+          progress={importProgress}
+          onDismiss={() => setImportProgress(null)}
         />
       </div>
     );
@@ -480,6 +722,7 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         isFullScreen={isFullScreen}
         onToggleFullScreen={() => setIsFullScreen((v) => !v)}
         onOpenTemplates={() => setTemplatesOpen(true)}
+        onPublishTemplate={() => setPublishModalOpen(true)}
         onBackToHub={() => onSelectWork?.(null)}
         onToggleCitations={() => setCitationsOpen((v) => !v)}
         citationsOpen={citationsOpen}
@@ -489,6 +732,9 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         onExportMarkdown={handleExportMarkdown}
         onAddToReadings={() => setExportFolderModalOpen(true)}
       />
+
+      {/* Barra de Control Contextual de Tablas (cuando el cursor está dentro de una tabla) */}
+      <TableControlBar editor={editor} />
 
       <div className="flex-1 flex overflow-hidden relative">
         {/* Área Central: Escritorio de Edición con Adaptabilidad y Hojas Reales */}
@@ -632,6 +878,15 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
                 color: #334155;
               }
 
+              .ProseMirror h4 {
+                font-size: 11pt;
+                font-weight: 700;
+                margin-top: 1em;
+                margin-bottom: 0.3em;
+                color: #475569;
+                letter-spacing: -0.01em;
+              }
+
               .ProseMirror blockquote {
                 border-left: 4px solid #6366f1;
                 background-color: #f8fafc;
@@ -744,14 +999,14 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
               .ProseMirror table {
                 margin-top: 1.25em;
                 margin-bottom: 1.25em;
-                border-collapse: separate;
-                border-spacing: 0;
+                border-collapse: collapse;
                 table-layout: fixed;
                 width: 100%;
-                border-radius: 8px;
-                overflow: hidden;
+                border-radius: 6px;
                 border: 1px solid #cbd5e1;
                 box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.06);
+                box-sizing: border-box;
+                position: relative;
               }
 
               .ProseMirror table[data-align="center"] { margin-left: auto !important; margin-right: auto !important; }
@@ -763,33 +1018,53 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
                 color: #0f172a;
                 font-weight: 700;
                 text-align: left;
-                border-bottom: 2px solid #cbd5e1;
-                border-right: 1px solid #e2e8f0;
-                padding: 10px 14px;
+                border: 1px solid #cbd5e1;
+                padding: 8px 12px;
                 font-size: 10pt;
+                position: relative !important;
+                box-sizing: border-box !important;
+                min-width: 25px;
               }
 
               .ProseMirror td {
-                border-bottom: 1px solid #e2e8f0;
-                border-right: 1px solid #e2e8f0;
-                padding: 10px 14px;
+                border: 1px solid #cbd5e1;
+                padding: 8px 12px;
                 font-size: 10pt;
                 color: #1e293b;
                 vertical-align: top;
-                min-width: 1em;
-              }
-
-              .ProseMirror tr:last-child td {
-                border-bottom: none;
-              }
-
-              .ProseMirror td:last-child,
-              .ProseMirror th:last-child {
-                border-right: none;
+                position: relative !important;
+                box-sizing: border-box !important;
+                min-width: 25px;
               }
 
               .ProseMirror tr:nth-child(even) td {
                 background-color: #fafbfc;
+              }
+
+              /* Selector y celda activa de TipTap tables */
+              .ProseMirror .selectedCell:after {
+                z-index: 2;
+                position: absolute;
+                content: "";
+                left: 0; right: 0; top: 0; bottom: 0;
+                background: rgba(99, 102, 241, 0.18);
+                pointer-events: none;
+              }
+
+              /* Manilla visual de redimensionamiento de columna al arrastrar el borde */
+              .ProseMirror .column-resize-handle {
+                position: absolute;
+                right: -2px;
+                top: 0;
+                bottom: -2px;
+                width: 4px;
+                background-color: #6366f1;
+                pointer-events: none;
+                z-index: 20;
+              }
+
+              .ProseMirror.resize-cursor {
+                cursor: col-resize !important;
               }
 
               /* ESTILOS DE CORTE DE HOJA AUTOMÁTICO Y ALTURA FIJA DE PÁGINA */
@@ -906,12 +1181,20 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
             <div
               className="visual-page"
               onMouseDown={(e) => {
-                if (e.target === e.currentTarget) {
-                  e.preventDefault();
-                  editor?.commands.focus('end');
+                if (e.target === e.currentTarget && editor) {
+                  // Calcular la posición exacta del documento correspondiente a las coordenadas (X, Y)
+                  // evitando saltar al final del documento si el usuario pulsa en los márgenes
+                  const domRect = editor.view.dom.getBoundingClientRect();
+                  const targetX = Math.max(domRect.left + 2, Math.min(domRect.right - 2, e.clientX));
+                  const pos = editor.view.posAtCoords({ left: targetX, top: e.clientY });
+                  if (pos && typeof pos.pos === 'number') {
+                    e.preventDefault();
+                    editor.chain().focus().setTextSelection(pos.pos).run();
+                  }
                 }
               }}
             >
+              <FloatingFormatMenu editor={editor} />
               <EditorContent editor={editor} />
 
               {/* Relleno de altura fija de la última hoja y pie de página */}
@@ -921,8 +1204,17 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
                     className="last-page-spacer cursor-text"
                     style={{ height: `${pageInfo.lastPageFillerPx}px` }}
                     onMouseDown={(e) => {
-                      e.preventDefault();
-                      editor?.commands.focus('end');
+                      if (editor) {
+                        e.preventDefault();
+                        const domRect = editor.view.dom.getBoundingClientRect();
+                        const targetX = Math.max(domRect.left + 2, Math.min(domRect.right - 2, e.clientX));
+                        const pos = editor.view.posAtCoords({ left: targetX, top: e.clientY });
+                        if (pos && typeof pos.pos === 'number') {
+                          editor.chain().focus().setTextSelection(pos.pos).run();
+                        } else {
+                          editor.commands.focus('end');
+                        }
+                      }
                     }}
                   />
                   <div
@@ -1175,6 +1467,35 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal de Publicar como Plantilla Comunitaria */}
+      <PublishTemplateModal
+        isOpen={publishModalOpen}
+        onClose={() => setPublishModalOpen(false)}
+        work={activeWork}
+        currentUserId={currentUser?.id}
+        currentUserName={currentUser?.name}
+        currentUserHandle={currentUser?.username}
+        onNotify={onNotify}
+        onOpenAuthModal={onOpenAccountModal}
+      />
+
+      {/* Modal de Importación Progresiva */}
+      <ImportDocumentModal
+        isOpen={isImportModalOpen}
+        onClose={() => {
+          setIsImportModalOpen(false);
+          setDroppedImportFile(null);
+        }}
+        droppedFile={droppedImportFile}
+        onConfirmImport={handleConfirmImport}
+      />
+
+      {/* Notificación Flotante de Progreso en Esquina Inferior Derecha */}
+      <FloatingImportProgress
+        progress={importProgress}
+        onDismiss={() => setImportProgress(null)}
+      />
     </div>
   );
 };

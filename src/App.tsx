@@ -312,6 +312,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   const { startRouteStep, activeRouteStep } = useTimer();
 
   const [writerTemplatesModalOpen, setWriterTemplatesModalOpen] = useState<boolean>(false);
+  const [writerImportModalOpen, setWriterImportModalOpen] = useState<boolean>(false);
   const [exportFolderModalOpen, setExportFolderModalOpen] = useState<boolean>(false);
   const [workForExport, setWorkForExport] = useState<StudyWorkDraft | null>(null);
   const [selectedExportFolderId, setSelectedExportFolderId] = useState<string | null>(null);
@@ -421,6 +422,9 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 onOpenTemplates={() => {
                   onSelectWork(null);
                 }}
+                onOpenImportModal={() => {
+                  setWriterImportModalOpen(true);
+                }}
                 onExportToReadings={(w) => {
                   onSelectWork(w.id);
                   setWorkForExport(w);
@@ -524,9 +528,21 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 onNotify={onNotify}
                 templatesOpen={writerTemplatesModalOpen}
                 onSetTemplatesOpen={setWriterTemplatesModalOpen}
+                importModalOpen={writerImportModalOpen}
+                onSetImportModalOpen={setWriterImportModalOpen}
                 exportFolderModalOpen={exportFolderModalOpen}
                 onSetExportFolderModalOpen={setExportFolderModalOpen}
                 layoutStyle={layoutStyle}
+                currentUser={
+                  user
+                    ? {
+                        id: user.id,
+                        name: user.fullName || user.email || 'Estudiante',
+                        username: user.username || null,
+                      }
+                    : null
+                }
+                onOpenAccountModal={onOpenAccountModal}
               />
             </div>
           )}

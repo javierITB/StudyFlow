@@ -518,4 +518,59 @@ export interface CollaboratorPresence {
   onlineAt: string;
 }
 
+// ============================================================================
+// COMUNIDAD DE PLANTILLAS PÚBLICAS Y CALIFICACIONES
+// ============================================================================
+export interface CommunityTemplateRecord {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorUsername?: string | null;
+  title: string;
+  category: string;
+  technicalProfile: string;
+  description: string;
+  targetWords: number;
+  paperSize?: 'letter' | 'legal' | 'a4';
+  contentHtml: string;
+  contentText?: string;
+  tags: string[];
+  avgRating: number;
+  ratingCount: number;
+  userRating?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================================================
+// SUITE DE TRAZOS Y DESTACADOR A MANO ALZADA EN PDF
+// ============================================================================
+export type DrawingToolType = 'pen' | 'highlighter' | 'eraser';
+
+export interface StrokePoint {
+  x: number; // Ratio x normalizado (0.0 a 1.0) respecto al ancho de la hoja
+  y: number; // Ratio y normalizado (0.0 a 1.0) respecto al alto de la hoja
+  pressure?: number; // Presión del lápiz óptico / Apple Pencil (0.0 a 1.0)
+}
+
+export interface DrawingStroke {
+  id: string;
+  tool: 'pen' | 'highlighter';
+  color: string;
+  size: number; // Ancho base de trazo a escala 1.0
+  opacity: number;
+  points: StrokePoint[];
+}
+
+export interface PdfDrawingRecord {
+  id: string;
+  docId: string;
+  page: number;
+  strokes: DrawingStroke[];
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+}
+
+
 

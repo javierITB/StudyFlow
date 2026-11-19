@@ -84,11 +84,20 @@ export const PageBreak = Node.create({
       {
         tag: 'div[data-type="page-break"]',
       },
+      {
+        tag: 'div.studyflow-page-break',
+      },
+      {
+        tag: 'hr.studyflow-page-break',
+      },
+      {
+        tag: 'div[data-page-break]',
+      },
     ];
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'page-break' })];
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'page-break', class: 'studyflow-page-break' })];
   },
 
   addNodeView() {

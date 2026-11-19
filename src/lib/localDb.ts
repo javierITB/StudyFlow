@@ -2,6 +2,7 @@ import {
   DocumentOcclusionRecord,
   DocumentRecord,
   FolderRecord,
+  PdfDrawingRecord,
   PersistedPlanState,
   StickyNoteRecord,
   StudySettings,
@@ -11,7 +12,7 @@ import {
 import { DEFAULT_STUDY_SETTINGS } from './studyMethods';
 
 const DB_NAME = 'StudyFlow_Persistent_DB';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 export type StoreName =
   | 'folders'
@@ -20,6 +21,7 @@ export type StoreName =
   | 'occlusions'
   | 'tasks'
   | 'works'
+  | 'pdf_drawings'
   | 'settings';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -81,6 +83,13 @@ export function openDatabase(): Promise<IDBDatabase> {
         const workStore = db.createObjectStore('works', { keyPath: 'id' });
         workStore.createIndex('updatedAt', 'updatedAt', { unique: false });
         workStore.createIndex('title', 'title', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains('pdf_drawings')) {
+        const drawStore = db.createObjectStore('pdf_drawings', { keyPath: 'id' });
+        drawStore.createIndex('docId', 'docId', { unique: false });
+        drawStore.createIndex('page', 'page', { unique: false });
+        drawStore.createIndex('docId_page', ['docId', 'page'], { unique: false });
       }
 
       if (!db.objectStoreNames.contains('settings')) {
@@ -252,6 +261,29 @@ export async function loadLocalSnapshot(): Promise<{
   };
 }
 
+export async function getPdfDrawing(
+  docId: string,
+  page: number
+): Promise<PdfDrawingRecord | null> {
+  const all = await dbGetAll<PdfDrawingRecord>('pdf_drawings');
+  return all.find((d) => d.docId === docId && d.page === page) || null;
+}
+
+export async function getAllPdfDrawingsForDoc(
+  docId: string
+): Promise<PdfDrawingRecord[]> {
+  const all = await dbGetAll<PdfDrawingRecord>('pdf_drawings');
+  return all.filter((d) => d.docId === docId);
+}
+
+export async function savePdfDrawing(drawing: PdfDrawingRecord): Promise<void> {
+  await dbPut('pdf_drawings', drawing);
+}
+
+export async function deletePdfDrawing(id: string): Promise<void> {
+  await dbDelete('pdf_drawings', id);
+}
+
 export async function clearAllLocalData(): Promise<void> {
   await Promise.all([
     dbClearStore('folders'),
@@ -260,6 +292,7 @@ export async function clearAllLocalData(): Promise<void> {
     dbClearStore('occlusions'),
     dbClearStore('tasks'),
     dbClearStore('works'),
+    dbClearStore('pdf_drawings'),
     dbClearStore('settings'),
   ]);
 }
