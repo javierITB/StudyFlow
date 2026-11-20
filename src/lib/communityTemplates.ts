@@ -61,6 +61,8 @@ export async function fetchTopCommunityTemplates(
     const { data, error } = await supabase
       .from('community_templates')
       .select('*')
+      .neq('status', 'archived')
+      .neq('status', 'under_review')
       .order('avg_rating', { ascending: false })
       .order('rating_count', { ascending: false })
       .order('created_at', { ascending: false })
@@ -108,7 +110,11 @@ export async function searchCommunityTemplates(
   const { query, category, sortBy = 'top_rated', limit = 50, userId } = options;
 
   try {
-    let builder = supabase.from('community_templates').select('*');
+    let builder = supabase
+      .from('community_templates')
+      .select('*')
+      .neq('status', 'archived')
+      .neq('status', 'under_review');
 
     if (category && category !== 'Todas') {
       builder = builder.or(`category.eq."${category}",technical_profile.ilike."%${category}%"`);
@@ -193,6 +199,7 @@ export async function publishWorkAsCommunityTemplate(
     tags: params.tags || [],
     avg_rating: 0.0,
     rating_count: 0,
+    status: 'published',
     created_at: now,
     updated_at: now,
   };

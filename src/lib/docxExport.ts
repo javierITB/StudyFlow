@@ -215,6 +215,35 @@ function appendBlockElement(el: HTMLElement, children: Array<Paragraph | Table>)
         spacing: { before: 160, after: 80 },
       })
     );
+  } else if (tag === 'h4') {
+    children.push(
+      new Paragraph({
+        text: el.textContent || '',
+        heading: HeadingLevel.HEADING_4,
+        alignment: align,
+        spacing: { before: 140, after: 60 },
+      })
+    );
+  } else if (tag === 'pre') {
+    const textLines = (el.textContent || '').split('\n');
+    textLines.forEach((line) => {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: line,
+              font: 'Consolas',
+              size: 18,
+              color: 'F8FAFC',
+            }),
+          ],
+          shading: {
+            fill: '0F172A',
+          },
+          spacing: { before: 20, after: 20 },
+        })
+      );
+    });
   } else if (tag === 'table') {
     const rows: TableRow[] = [];
     const trElements = Array.from(
@@ -431,9 +460,41 @@ export function exportHtmlToMarkdown(html: string): string {
       if (tag === 'h1') md += `# ${text}\n\n`;
       else if (tag === 'h2') md += `## ${text}\n\n`;
       else if (tag === 'h3') md += `### ${text}\n\n`;
+      else if (tag === 'h4') md += `#### ${text}\n\n`;
       else if (tag === 'blockquote') md += `> ${text}\n\n`;
-      else if (tag === 'ul' || tag === 'ol') {
-        const items = Array.from(el.querySelectorAll ? el.querySelectorAll('li') : el.getElementsByTagName('li'));
+      else if (tag === 'pre') {
+        const codeEl = el.querySelector
+          ? el.querySelector('code')
+          : (el.getElementsByTagName?.('code')?.[0] as Element);
+        const className =
+          codeEl?.getAttribute?.('class') || (codeEl as HTMLElement)?.className || '';
+        const lang = className.match(/language-([a-z0-9_-]+)/i)?.[1] || '';
+        md += `\`\`\`${lang}\n${el.textContent || ''}\n\`\`\`\n\n`;
+      } else if (tag === 'table') {
+        const rows = Array.from(
+          el.querySelectorAll ? el.querySelectorAll('tr') : el.getElementsByTagName?.('tr') || []
+        );
+        rows.forEach((tr, rIdx) => {
+          const cells = Array.from(
+            tr.querySelectorAll
+              ? tr.querySelectorAll('th, td')
+              : [
+                  ...Array.from(tr.getElementsByTagName?.('th') || []),
+                  ...Array.from(tr.getElementsByTagName?.('td') || []),
+                ]
+          ).map((c) => (c.textContent?.trim() || '').replace(/\|/g, '\\|'));
+          if (cells.length > 0) {
+            md += `| ${cells.join(' | ')} |\n`;
+            if (rIdx === 0) {
+              md += `| ${cells.map(() => '---').join(' | ')} |\n`;
+            }
+          }
+        });
+        md += '\n';
+      } else if (tag === 'ul' || tag === 'ol') {
+        const items = Array.from(
+          el.querySelectorAll ? el.querySelectorAll('li') : el.getElementsByTagName('li')
+        );
         items.forEach((li, idx) => {
           const prefix = tag === 'ul' ? '- ' : `${idx + 1}. `;
           md += `${prefix}${li.textContent?.trim() || ''}\n`;
@@ -455,6 +516,7 @@ const SHARED_EXPORT_STYLES = `
     line-height: 1.7;
     color: #0f172a;
     background: #ffffff;
+    box-sizing: border-box;
   }
   .sf-export-content p {
     margin: 0 0 0.9em 0;
@@ -483,6 +545,13 @@ const SHARED_EXPORT_STYLES = `
     margin: 1.1em 0 0.35em 0;
     color: #334155;
   }
+  .sf-export-content h4 {
+    font-size: 11pt;
+    font-weight: 700;
+    margin: 1em 0 0.3em 0;
+    color: #475569;
+    letter-spacing: -0.01em;
+  }
   .sf-export-content blockquote {
     border-left: 4px solid #6366f1;
     background-color: #f8fafc;
@@ -506,30 +575,302 @@ const SHARED_EXPORT_STYLES = `
   .sf-export-content li {
     margin-bottom: 0.3em;
   }
-  .sf-export-content table {
-    margin: 1.25em 0;
-    border-collapse: collapse;
-    table-layout: fixed;
-    width: 100%;
-    border: 1px solid #cbd5e1;
+  .sf-export-content mark {
+    background-color: #fef08a;
+    border-radius: 2px;
+    padding: 1px 3px;
   }
-  .sf-export-content th {
+  .sf-export-content sup {
+    font-size: 0.75em;
+    vertical-align: super;
+    line-height: 0;
+    font-weight: 600;
+    color: #4338ca;
+  }
+  .sf-export-content sub {
+    font-size: 0.75em;
+    vertical-align: sub;
+    line-height: 0;
+    font-weight: 600;
+  }
+  .sf-export-content a {
+    color: #2563eb;
+    text-decoration: underline;
+  }
+
+  /* BLOQUES DE CÓDIGO CON ESTÉTICA OSCURA DE ALTA DEFINICIÓN */
+  .sf-export-content pre {
+    background-color: #0f172a !important;
+    color: #f8fafc !important;
+    padding: 12px 16px !important;
+    border-radius: 8px !important;
+    border: 1px solid #1e293b !important;
+    font-family: 'JetBrains Mono', 'Courier New', Courier, monospace !important;
+    font-size: 8pt !important;
+    line-height: 1.4 !important;
+    margin: 1.2em 0 !important;
+    overflow-x: hidden !important;
+    white-space: pre-wrap !important;
+    word-break: normal !important;
+    tab-size: 2 !important;
+    box-sizing: border-box !important;
+  }
+  .sf-export-content pre code {
+    background: transparent !important;
+    color: inherit !important;
+    padding: 0 !important;
+    border: none !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: inherit !important;
+    white-space: pre-wrap !important;
+  }
+  .sf-export-content code {
     background-color: #f1f5f9;
     color: #0f172a;
-    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 4px;
+    border: 1px solid #e2e8f0;
+    font-family: 'JetBrains Mono', 'Courier New', Courier, monospace;
+    font-size: 0.9em;
+    word-break: break-all;
+  }
+
+  /* TABLAS TÉCNICAS Y MATRICIALES PROFESIONALES */
+  .sf-export-content table {
+    margin: 1.25em 0 !important;
+    border-collapse: collapse !important;
+    width: 100% !important;
+    border: 1px solid #cbd5e1 !important;
+    box-sizing: border-box !important;
+  }
+  .sf-export-content thead {
+    display: table-header-group;
+  }
+  .sf-export-content tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .sf-export-content th {
+    background-color: #f1f5f9 !important;
+    color: #0f172a !important;
+    font-weight: 700 !important;
     text-align: left;
-    border: 1px solid #cbd5e1;
-    padding: 10px 14px;
-    font-size: 10pt;
+    border: 1px solid #cbd5e1 !important;
+    padding: 6px 8px !important;
+    font-size: 8.5pt !important;
+    line-height: 1.35 !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+    box-sizing: border-box !important;
+    vertical-align: middle !important;
   }
   .sf-export-content td {
-    border: 1px solid #e2e8f0;
-    padding: 10px 14px;
-    font-size: 10pt;
-    color: #1e293b;
-    vertical-align: top;
+    border: 1px solid #e2e8f0 !important;
+    padding: 6px 8px !important;
+    font-size: 8.5pt !important;
+    line-height: 1.35 !important;
+    color: #1e293b !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+    box-sizing: border-box !important;
+    vertical-align: middle !important;
+  }
+  .sf-export-content tr:nth-child(even) td {
+    background-color: #f8fafc !important;
+  }
+  .sf-export-content th.cell-center,
+  .sf-export-content td.cell-center {
+    text-align: center !important;
+  }
+  .sf-export-content td code,
+  .sf-export-content th code {
+    font-size: 8pt !important;
+    padding: 1px 4px !important;
+    word-break: break-all !important;
+    overflow-wrap: anywhere !important;
   }
 `;
+
+/**
+ * Enriquece la estructura del DOM de exportación asegurando que:
+ * 1. Los bloques de código conserven su contenedor oscuro, fuentes monoespaciadas y ajuste de líneas.
+ * 2. Las tablas distribuyan anchos proporcionales (columnas angostas para iconos/checks y amplias para textos técnicos).
+ * 3. Se active overflow-wrap y centrado automático en celdas de iconos.
+ */
+export function enhanceDomForExport(container: HTMLElement): void {
+  const doc = container.ownerDocument || (typeof document !== 'undefined' ? document : null);
+  if (!doc) return;
+
+  // 1. Procesar bloques de código pre y code
+  const preElements = Array.from(
+    container.querySelectorAll ? container.querySelectorAll('pre') : container.getElementsByTagName('pre')
+  );
+  for (const pre of preElements) {
+    const preCss =
+      "background-color: #0f172a; color: #f8fafc; padding: 12px 16px; border-radius: 8px; border: 1px solid #1e293b; font-family: 'JetBrains Mono', 'Courier New', Courier, monospace; font-size: 8pt; line-height: 1.4; white-space: pre-wrap; word-break: normal; margin: 1.2em 0; box-sizing: border-box;";
+    pre.setAttribute('style', preCss);
+    if ((pre as HTMLElement).style) {
+      pre.style.backgroundColor = '#0f172a';
+      pre.style.color = '#f8fafc';
+      pre.style.padding = '12px 16px';
+      pre.style.borderRadius = '8px';
+      pre.style.border = '1px solid #1e293b';
+      pre.style.fontFamily = "'JetBrains Mono', 'Courier New', Courier, monospace";
+      pre.style.fontSize = '8pt';
+      pre.style.lineHeight = '1.4';
+      pre.style.whiteSpace = 'pre-wrap';
+      pre.style.wordBreak = 'normal';
+      pre.style.margin = '1.2em 0';
+      pre.style.boxSizing = 'border-box';
+    }
+
+    const codeInside = Array.from(
+      pre.querySelectorAll ? pre.querySelectorAll('code') : pre.getElementsByTagName('code')
+    );
+    codeInside.forEach((c) => {
+      c.setAttribute('style', 'background-color: transparent; color: inherit; padding: 0; border: none; font-family: inherit; font-size: inherit; white-space: pre-wrap;');
+      if ((c as HTMLElement).style) {
+        (c as HTMLElement).style.backgroundColor = 'transparent';
+        (c as HTMLElement).style.color = 'inherit';
+        (c as HTMLElement).style.padding = '0';
+        (c as HTMLElement).style.border = 'none';
+        (c as HTMLElement).style.fontFamily = 'inherit';
+        (c as HTMLElement).style.fontSize = 'inherit';
+        (c as HTMLElement).style.whiteSpace = 'pre-wrap';
+      }
+    });
+  }
+
+  // 2. Procesar tablas
+  const tables = Array.from(
+    container.querySelectorAll ? container.querySelectorAll('table') : container.getElementsByTagName('table')
+  );
+  for (const table of tables) {
+    table.setAttribute('style', 'width: 100%; border-collapse: collapse; box-sizing: border-box;');
+    if (table.style) {
+      table.style.width = '100%';
+      table.style.borderCollapse = 'collapse';
+      table.style.boxSizing = 'border-box';
+    }
+
+    const rows = Array.from(
+      table.querySelectorAll ? table.querySelectorAll('tr') : table.getElementsByTagName('tr')
+    );
+    if (rows.length === 0) continue;
+
+    let maxCols = 0;
+    rows.forEach((r) => {
+      const elementCells = Array.from(r.children || r.childNodes || []).filter(
+        (n) => n.nodeType === 1
+      );
+      maxCols = Math.max(maxCols, elementCells.length);
+    });
+    if (maxCols === 0) continue;
+
+    const isColIconOrShort: boolean[] = new Array(maxCols).fill(true);
+    const colWidthAttrs: (number | null)[] = new Array(maxCols).fill(null);
+
+    rows.forEach((r, rIdx) => {
+      const cells = Array.from(r.children || r.childNodes || []).filter(
+        (n) => n.nodeType === 1
+      ) as Element[];
+      cells.forEach((cell, colIdx) => {
+        const text = cell.textContent?.trim() || '';
+        const cw = cell.getAttribute('colwidth') || cell.getAttribute('data-colwidth');
+        if (cw && colWidthAttrs[colIdx] === null) {
+          const parsed = parseInt(cw.split(',')[0], 10);
+          if (!isNaN(parsed) && parsed > 0) colWidthAttrs[colIdx] = parsed;
+        }
+
+        const isHeader = rIdx === 0 || cell.tagName.toLowerCase() === 'th';
+        if (!isHeader && text.length > 4) {
+          isColIconOrShort[colIdx] = false;
+        }
+      });
+    });
+
+    const hasFullColWidths = colWidthAttrs.every((w) => w !== null);
+    const colPercentages: number[] = [];
+
+    if (hasFullColWidths) {
+      const totalW = (colWidthAttrs as number[]).reduce((a, b) => a + b, 0);
+      colWidthAttrs.forEach((w) => {
+        colPercentages.push(Math.round(((w as number) / Math.max(1, totalW)) * 1000) / 10);
+      });
+    } else if (maxCols >= 4) {
+      let iconCount = 0;
+      for (let c = 0; c < maxCols; c++) {
+        if (isColIconOrShort[c]) iconCount++;
+      }
+
+      const iconColPct = Math.max(6, Math.min(10, Math.floor(40 / Math.max(1, iconCount))));
+      const totalIconPct = iconCount * iconColPct;
+      const textCount = maxCols - iconCount;
+      const remainingPct = Math.max(20, 100 - totalIconPct);
+      const textColPct = textCount > 0 ? remainingPct / textCount : 100 / maxCols;
+
+      for (let c = 0; c < maxCols; c++) {
+        colPercentages.push(isColIconOrShort[c] ? iconColPct : textColPct);
+      }
+    }
+
+    let colgroup = table.querySelector
+      ? table.querySelector('colgroup')
+      : (table.getElementsByTagName('colgroup')[0] as HTMLElement | null);
+    if (!colgroup && doc.createElement) {
+      colgroup = doc.createElement('colgroup');
+      table.insertBefore(colgroup, table.firstChild);
+    }
+    if (colgroup) {
+      while (colgroup.firstChild) {
+        colgroup.removeChild(colgroup.firstChild);
+      }
+      if (colPercentages.length === maxCols) {
+        if (table.style) table.style.tableLayout = 'fixed';
+        colPercentages.forEach((pct) => {
+          if (doc.createElement) {
+            const col = doc.createElement('col');
+            if (col.style) col.style.width = `${pct}%`;
+            col.setAttribute('style', `width: ${pct}%;`);
+            colgroup?.appendChild(col);
+          }
+        });
+      } else {
+        if (table.style) table.style.tableLayout = 'auto';
+      }
+    }
+
+    rows.forEach((r) => {
+      const cells = Array.from(r.children || r.childNodes || []).filter((n) => n.nodeType === 1) as HTMLElement[];
+      cells.forEach((cell, colIdx) => {
+        if (cell.style) {
+          cell.style.boxSizing = 'border-box';
+          cell.style.overflowWrap = 'anywhere';
+          cell.style.wordBreak = 'break-word';
+          cell.style.padding = '6px 8px';
+          cell.style.fontSize = maxCols >= 6 ? '8pt' : '8.5pt';
+          cell.style.lineHeight = '1.35';
+
+          if (isColIconOrShort[colIdx]) {
+            cell.style.textAlign = 'center';
+          }
+        }
+
+        const innerCodes = Array.from(
+          cell.querySelectorAll ? cell.querySelectorAll('code') : cell.getElementsByTagName('code')
+        );
+        innerCodes.forEach((codeEl) => {
+          if ((codeEl as HTMLElement).style) {
+            (codeEl as HTMLElement).style.wordBreak = 'break-all';
+            (codeEl as HTMLElement).style.overflowWrap = 'anywhere';
+            (codeEl as HTMLElement).style.fontSize = '8pt';
+          }
+        });
+      });
+    });
+  }
+}
 
 /**
  * Genera y descarga un archivo .pdf real directamente en la pestaña actual,
@@ -568,12 +909,11 @@ export async function exportHtmlToPdf(
 
   try {
     const contentEl = sandboxHost.querySelector('.sf-export-content') as HTMLElement;
-    const rawBlocks = Array.from(contentEl.children) as HTMLElement[];
+    enhanceDomForExport(contentEl);
 
-    // Paginar bloques en hojas exactas según printableHeightPx
-    const pagesBlocks: HTMLElement[][] = [[]];
-    let currentAcc = 0;
-    let prevMarginBottom = 0;
+    // Normalizar y segmentar bloques que por sí solos superan una hoja completa
+    const normalizedBlocks: HTMLElement[] = [];
+    const rawBlocks = Array.from(contentEl.children) as HTMLElement[];
 
     for (const block of rawBlocks) {
       if (
@@ -583,6 +923,70 @@ export async function exportHtmlToPdf(
         continue;
       }
 
+      if (block.tagName === 'TABLE' && block.offsetHeight > dims.printableHeightPx) {
+        const thead = block.querySelector('thead');
+        const colgroup = block.querySelector('colgroup');
+        const tbody = block.querySelector('tbody') || block;
+        const allTrs = Array.from(tbody.querySelectorAll('tr'));
+        const bodyTrs = thead ? allTrs : allTrs.slice(1);
+        const headerTr = thead ? null : allTrs[0];
+
+        const ROWS_PER_PAGE = 18;
+        for (let r = 0; r < bodyTrs.length; r += ROWS_PER_PAGE) {
+          const chunk = bodyTrs.slice(r, r + ROWS_PER_PAGE);
+          const chunkTable = document.createElement('table');
+          chunkTable.className = block.className;
+          chunkTable.style.cssText = block.style.cssText;
+          if (colgroup) chunkTable.appendChild(colgroup.cloneNode(true));
+          if (thead) {
+            chunkTable.appendChild(thead.cloneNode(true));
+          } else if (headerTr) {
+            const newThead = document.createElement('thead');
+            newThead.appendChild(headerTr.cloneNode(true));
+            chunkTable.appendChild(newThead);
+          }
+          const newTbody = document.createElement('tbody');
+          chunk.forEach((tr) => newTbody.appendChild(tr.cloneNode(true)));
+          chunkTable.appendChild(newTbody);
+
+          if (r > 0) {
+            const pb = document.createElement('div');
+            pb.setAttribute('data-type', 'page-break');
+            normalizedBlocks.push(pb);
+          }
+          normalizedBlocks.push(chunkTable);
+        }
+      } else if (block.tagName === 'PRE' && block.offsetHeight > dims.printableHeightPx) {
+        const fullText = block.textContent || '';
+        const lines = fullText.split('\n');
+        const LINES_PER_PAGE = 35;
+        for (let l = 0; l < lines.length; l += LINES_PER_PAGE) {
+          const chunkLines = lines.slice(l, l + LINES_PER_PAGE);
+          const chunkPre = document.createElement('pre');
+          chunkPre.className = block.className;
+          chunkPre.style.cssText = block.style.cssText;
+          const chunkCode = document.createElement('code');
+          chunkCode.textContent = chunkLines.join('\n');
+          chunkPre.appendChild(chunkCode);
+
+          if (l > 0) {
+            const pb = document.createElement('div');
+            pb.setAttribute('data-type', 'page-break');
+            normalizedBlocks.push(pb);
+          }
+          normalizedBlocks.push(chunkPre);
+        }
+      } else {
+        normalizedBlocks.push(block);
+      }
+    }
+
+    // Paginar bloques en hojas exactas según printableHeightPx
+    const pagesBlocks: HTMLElement[][] = [[]];
+    let currentAcc = 0;
+    let prevMarginBottom = 0;
+
+    for (const block of normalizedBlocks) {
       if (
         block.getAttribute('data-type') === 'page-break' ||
         block.classList.contains('page-break-wrapper')
@@ -715,6 +1119,12 @@ export function printFormattedDocument(
     return;
   }
 
+  // Pre-procesar contenido para dotarlo de estilos óptimos
+  const tempContainer = document.createElement('div');
+  tempContainer.innerHTML = htmlContent;
+  enhanceDomForExport(tempContainer);
+  const enhancedHtml = tempContainer.innerHTML;
+
   doc.open();
   doc.write(`
     <!DOCTYPE html>
@@ -750,7 +1160,7 @@ export function printFormattedDocument(
       </head>
       <body>
         <div class="sf-export-content">
-          ${htmlContent}
+          ${enhancedHtml}
         </div>
       </body>
     </html>

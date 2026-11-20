@@ -115,6 +115,7 @@ import { UsernameOnboardingModal } from './components/UsernameOnboardingModal';
 import { NotificationsBell } from './components/NotificationsBell';
 import { FriendsAndSharesModal } from './components/FriendsAndSharesModal';
 import { ShareDocumentModal } from './components/ShareDocumentModal';
+import { FeedbackModal } from './components/FeedbackModal';
 import {
   acceptDocumentCopy,
   extractShareTokenFromSearch,
@@ -169,6 +170,7 @@ interface WorkspaceShellProps {
   user: UserProfile | null;
   syncStatus: 'local' | 'synced' | 'syncing' | 'error';
   onOpenAccountModal: () => void;
+  onOpenFeedbackModal?: () => void;
   onOpenFriendsModal: () => void;
   onShareDocument: (doc: DocumentRecord) => void;
   notificationsSlot?: React.ReactNode;
@@ -258,6 +260,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   user,
   syncStatus,
   onOpenAccountModal,
+  onOpenFeedbackModal,
   onOpenFriendsModal,
   onShareDocument,
   notificationsSlot,
@@ -454,6 +457,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
           onOpenFriendsModal={onOpenFriendsModal}
           onOpenAppearanceModal={onOpenAppearanceModal}
           onOpenTutorial={onOpenTutorial}
+          onOpenFeedbackModal={onOpenFeedbackModal}
           notificationsSlot={notificationsSlot}
           hideBrandOnDesktop={(currentModule === 'docs' || currentModule === 'writer') && sidebarOpen}
           layoutStyle={layoutStyle}
@@ -840,6 +844,7 @@ export const App: React.FC = () => {
     unsubscribe: () => void;
   } | null>(null);
   const [accountModalOpen, setAccountModalOpen] = useState<boolean>(false);
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState<boolean>(false);
   const [diagnosticModalOpen, setDiagnosticModalOpen] = useState<boolean>(false);
   const [appearanceModalOpen, setAppearanceModalOpen] = useState<boolean>(false);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() =>
@@ -2806,6 +2811,7 @@ export const App: React.FC = () => {
         user={user}
         syncStatus={syncStatus}
         onOpenAccountModal={() => setAccountModalOpen(true)}
+        onOpenFeedbackModal={() => setFeedbackModalOpen(true)}
         onOpenFriendsModal={() => setFriendsModalOpen(true)}
         onShareDocument={(doc) => setShareDocTarget(doc)}
         notificationsSlot={
@@ -2901,6 +2907,13 @@ export const App: React.FC = () => {
         }
         onExportBackup={handleExportBackup}
         onImportBackup={handleImportBackup}
+        onOpenFeedback={() => setFeedbackModalOpen(true)}
+      />
+
+      <FeedbackModal
+        open={feedbackModalOpen}
+        onClose={() => setFeedbackModalOpen(false)}
+        user={user}
       />
 
       <UsernameOnboardingModal

@@ -15,6 +15,7 @@ vi.mock('../supabaseClient', () => {
         if (table === 'community_templates') {
           return {
             select: vi.fn().mockReturnValue({
+              neq: vi.fn().mockReturnThis(),
               order: vi.fn().mockReturnThis(),
               limit: vi.fn().mockResolvedValue({
                 data: [

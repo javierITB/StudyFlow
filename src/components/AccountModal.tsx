@@ -13,6 +13,9 @@ import {
   Upload,
   UserPlus,
   X,
+  Shield,
+  ExternalLink,
+  MessageSquarePlus,
 } from 'lucide-react';
 import { UserProfile } from '../types/studyflow';
 import { isSupabaseConfigured } from '../lib/supabaseClient';
@@ -40,6 +43,7 @@ interface AccountModalProps {
   onSyncNow: () => Promise<void>;
   onExportBackup: () => void;
   onImportBackup: (file: File) => Promise<void>;
+  onOpenFeedback?: () => void;
 }
 
 export const AccountModal: React.FC<AccountModalProps> = ({
@@ -54,6 +58,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   onSyncNow,
   onExportBackup,
   onImportBackup,
+  onOpenFeedback,
 }) => {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [identifier, setIdentifier] = useState('');
@@ -560,6 +565,40 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               }}
             />
           </div>
+        </div>
+
+        {/* Buzón de Sugerencias y Feedback */}
+        {onOpenFeedback && (
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenFeedback();
+              }}
+              className="w-full py-2 px-3 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-500/30 text-emerald-300 font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer text-xs"
+            >
+              <MessageSquarePlus className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Enviar sugerencia u opinión al Administrador</span>
+            </button>
+          </div>
+        )}
+
+        {/* Acceso a Consola Administrativa Root */}
+        <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+          <span className="flex items-center gap-1 text-slate-400">
+            <Shield className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Gobernanza del Sistema</span>
+          </span>
+          <a
+            href="/admin.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-indigo-400 hover:text-indigo-300 font-medium inline-flex items-center gap-1 transition-colors"
+          >
+            <span>Consola Root Admin</span>
+            <ExternalLink className="w-3 h-3" />
+          </a>
         </div>
       </div>
     </div>

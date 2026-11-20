@@ -353,7 +353,9 @@ export const CustomTable = Table.extend({
 
           const oversizedTables: { pos: number; node: PMNode }[] = [];
           state.doc.descendants((node, pos) => {
-            if (node.type.name === 'table' && node.childCount > maxRowsPerPage) {
+            // Contar únicamente filas de datos (node.childCount - 1) para no re-paginar
+            // tablas que ya fueron segmentadas con cabecera + 15 filas
+            if (node.type.name === 'table' && (node.childCount - 1) > maxRowsPerPage) {
               oversizedTables.push({ pos, node });
               return false;
             }
@@ -372,7 +374,9 @@ export const CustomTable = Table.extend({
                 const row = tableNode.child(i);
                 currentChunk.push(row);
 
-                if (currentChunk.length >= maxRowsPerPage && i < tableNode.childCount - 1) {
+                // Dividir cuando las filas de datos alcanzan maxRowsPerPage
+                const bodyRowsCount = headerRow ? currentChunk.length - 1 : currentChunk.length;
+                if (bodyRowsCount >= maxRowsPerPage && i < tableNode.childCount - 1) {
                   newNodes.push(tableType.create(tableNode.attrs, currentChunk));
                   newNodes.push(pageBreakType.create());
                   currentChunk = [];
@@ -442,7 +446,15 @@ export const CustomTable = Table.extend({
       cleanOrphanBreakTexts:
         () =>
         ({ tr, state, dispatch }) => {
-          const orphanBreakPositions: { pos: number; size: number }[] = [];
+          const pageBreakType = state.schema.nodes.pageBreak;
+          if (!pageBreakType) return false;
+
+          type BreakAction =
+            | { type: 'replaceWithBreak'; pos: number; size: number }
+            | { type: 'deleteDuplicate'; pos: number; size: number };
+
+          const actions: BreakAction[] = [];
+
           state.doc.descendants((node, pos) => {
             if (node.type.name === 'paragraph') {
               const text = node.textContent.trim();
@@ -451,19 +463,36 @@ export const CustomTable = Table.extend({
                 /^p[áa]gina\s+\d+$/i.test(text) ||
                 /^diapositiva\s+\d+$/i.test(text)
               ) {
-                orphanBreakPositions.push({ pos, size: node.nodeSize });
+                actions.push({ type: 'replaceWithBreak', pos, size: node.nodeSize });
               }
             }
           });
 
-          if (orphanBreakPositions.length === 0) return false;
+          // Detectar saltos de página consecutivos o redundantes que generen páginas en blanco
+          let previousWasBreak = false;
+          state.doc.forEach((node, offset) => {
+            if (node.type.name === 'pageBreak') {
+              if (previousWasBreak) {
+                actions.push({ type: 'deleteDuplicate', pos: offset, size: node.nodeSize });
+              }
+              previousWasBreak = true;
+            } else if (node.type.name === 'paragraph' && !node.textContent.trim()) {
+              // Párrafo vacío consecutivo a un salto: no resetea para evitar salto-vacío-salto
+            } else {
+              previousWasBreak = false;
+            }
+          });
+
+          if (actions.length === 0) return false;
 
           if (dispatch) {
-            const pageBreakType = state.schema.nodes.pageBreak;
-            if (pageBreakType) {
-              for (let i = orphanBreakPositions.length - 1; i >= 0; i--) {
-                const { pos, size } = orphanBreakPositions[i];
-                tr.replaceWith(pos, pos + size, pageBreakType.create());
+            // Procesar acciones de atrás hacia adelante (orden descendente de pos) para mantener offsets válidos
+            actions.sort((a, b) => b.pos - a.pos);
+            for (const act of actions) {
+              if (act.type === 'deleteDuplicate') {
+                tr.delete(act.pos, act.pos + act.size);
+              } else {
+                tr.replaceWith(act.pos, act.pos + act.size, pageBreakType.create());
               }
             }
           }

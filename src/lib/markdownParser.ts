@@ -51,6 +51,7 @@ export function parseMarkdownToHtml(
 
   let inTable = false;
   let tableRows: string[][] = [];
+  let tableAlignments: ('left' | 'center' | 'right')[] = [];
 
   const flushList = () => {
     if (inList) {
@@ -79,22 +80,82 @@ export function parseMarkdownToHtml(
       const bodyRows = tableRows.slice(1);
       const MAX_ROWS_PER_PAGE = 15;
 
+      const numCols = headerRow.length;
+      const isShortCol = new Array(numCols).fill(true);
+      const minColWidths = new Array(numCols).fill(60);
+
+      // Calcular el ancho mínimo necesario por columna basado en la palabra más larga del encabezado
+      // para evitar que palabras como 'Contador', 'Cliente', 'BigBoss' o 'Admin' se corten en sílabas (Conta / dor)
+      headerRow.forEach((cell, idx) => {
+        const cleanWords = cell.replace(/[*_`]/g, '').trim().split(/\s+/);
+        let maxWordLen = 0;
+        for (const w of cleanWords) {
+          if (w.length > maxWordLen) maxWordLen = w.length;
+        }
+        // Aproximadamente 9.5px por carácter en negrita + 24px de padding horizontal
+        minColWidths[idx] = Math.max(55, Math.ceil(maxWordLen * 9.5 + 24));
+      });
+
+      bodyRows.forEach((row) => {
+        row.forEach((cell, idx) => {
+          if (idx < numCols && cell.trim().length > 4) {
+            isShortCol[idx] = false;
+          }
+        });
+      });
+
+      let shortCount = 0;
+      for (let c = 0; c < numCols; c++) {
+        if (isShortCol[c]) shortCount++;
+      }
+
+      const colWidths = new Array(numCols).fill(100);
+      if (numCols >= 4 && shortCount > 0) {
+        let totalShortW = 0;
+        for (let c = 0; c < numCols; c++) {
+          if (isShortCol[c]) {
+            // Asignar el ancho mínimo necesario para que el encabezado no corte sílabas
+            const shortColW = Math.max(minColWidths[c], 65);
+            colWidths[c] = shortColW;
+            totalShortW += shortColW;
+          }
+        }
+        const remainingW = Math.max(200, 720 - totalShortW);
+        const textCount = numCols - shortCount;
+        const textW = textCount > 0 ? Math.floor(remainingW / textCount) : 100;
+
+        for (let c = 0; c < numCols; c++) {
+          if (!isShortCol[c]) {
+            colWidths[c] = Math.max(minColWidths[c], textW);
+          }
+        }
+      } else {
+        const evenW = Math.floor(720 / Math.max(1, numCols));
+        for (let c = 0; c < numCols; c++) {
+          colWidths[c] = Math.max(minColWidths[c], evenW);
+        }
+      }
+
       const buildTableSnippet = (rows: string[][], _isContinuation = false) => {
         let tableHtml = '<table class="studyflow-table border-collapse w-full my-4 border border-slate-700 text-sm">';
         if (headerRow) {
           tableHtml += '<thead class="bg-slate-800 text-slate-200 font-semibold"><tr>';
-          for (const cell of headerRow) {
-            tableHtml += `<th class="border border-slate-700 px-3 py-2 text-left">${parseInlineMarkdown(cell)}</th>`;
-          }
+          headerRow.forEach((cell, idx) => {
+            const align = tableAlignments[idx] || (isShortCol[idx] ? 'center' : 'left');
+            const alignClass = align === 'center' ? ' text-center' : align === 'right' ? ' text-right' : ' text-left';
+            tableHtml += `<th colwidth="${colWidths[idx]}" data-colwidth="${colWidths[idx]}" class="border border-slate-700 px-3 py-2${alignClass}" style="text-align: ${align};">${parseInlineMarkdown(cell)}</th>`;
+          });
           tableHtml += '</tr></thead>';
         }
         if (rows.length > 0) {
           tableHtml += '<tbody class="divide-y divide-slate-700/60">';
           for (const row of rows) {
             tableHtml += '<tr class="hover:bg-slate-800/40">';
-            for (const cell of row) {
-              tableHtml += `<td class="border border-slate-700 px-3 py-1.5">${parseInlineMarkdown(cell)}</td>`;
-            }
+            row.forEach((cell, idx) => {
+              const align = tableAlignments[idx] || (isShortCol[idx] ? 'center' : 'left');
+              const alignClass = align === 'center' ? ' text-center' : align === 'right' ? ' text-right' : ' text-left';
+              tableHtml += `<td colwidth="${colWidths[idx]}" data-colwidth="${colWidths[idx]}" class="border border-slate-700 px-3 py-1.5${alignClass}" style="text-align: ${align};">${parseInlineMarkdown(cell)}</td>`;
+            });
             tableHtml += '</tr>';
           }
           tableHtml += '</tbody>';
@@ -117,6 +178,7 @@ export function parseMarkdownToHtml(
       }
 
       tableRows = [];
+      tableAlignments = [];
       inTable = false;
     }
   };
@@ -132,13 +194,15 @@ export function parseMarkdownToHtml(
         flushBlockquote();
 
         const rawCodeText = codeBuffer.join('\n');
+        // Comprobar si el contenido dentro del bloque contiene diagramas ASCII, esquemas o árboles de cajas
+        const isAsciiDiagramOrBox = /(?:[+\-│┌┐└┘├┤┬┴┼]{3,}|\|\s*[-=]{2,}\s*\||\+[—\-+]+\+)/.test(rawCodeText);
         // Comprobar si el contenido dentro del bloque contiene encabezados markdown o texto estructurado
         const hasMarkdownHeadings = /(?:^|\n)#{1,6}\s+\S+/m.test(rawCodeText);
-        const hasListsOrTrees = /(?:^|\n)(?:\d+\.|[-*•]|[|├└│─-]{2,})\s+\S+/m.test(rawCodeText);
+        const hasListsOrTrees = !isAsciiDiagramOrBox && /(?:^|\n)(?:\d+\.|[-*•])\s+\S+/m.test(rawCodeText);
         const isTechnicalLang = /^(javascript|typescript|js|ts|python|py|sql|c|cpp|rust|go|java|html|css|json|bash|sh|php|ruby|swift|kotlin|csharp)$/i.test(codeBlockLang);
 
-        // Si contiene encabezados, listas, árboles o no es lenguaje técnico explícito y tiene estructura de documentación:
-        if ((hasMarkdownHeadings || hasListsOrTrees || !codeBlockLang || codeBlockLang === 'text' || codeBlockLang === 'txt' || codeBlockLang === 'markdown' || codeBlockLang === 'md') && !isTechnicalLang) {
+        // Si NO es diagrama ASCII y contiene encabezados o listas o documentación en bloque sin lenguaje técnico:
+        if (!isAsciiDiagramOrBox && (hasMarkdownHeadings || hasListsOrTrees || (!codeBlockLang && !hasListsOrTrees)) && !isTechnicalLang && (codeBlockLang === 'text' || codeBlockLang === 'txt' || codeBlockLang === 'markdown' || codeBlockLang === 'md')) {
           // Desempaquetar el contenido como texto estructurado normal
           const unpackedHtml = parseMarkdownToHtml(rawCodeText, options);
           htmlParts.push(unpackedHtml);
@@ -221,8 +285,19 @@ export function parseMarkdownToHtml(
 
     // 3. Tablas Markdown (| col 1 | col 2 |)
     if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-      // Ignorar fila separadora |---|---|
+      // Extraer alineaciones de la fila separadora |:---|:---:|---:|
       if (/^\|[\s\-:|]+\|$/.test(trimmed)) {
+        const alignTokens = trimmed
+          .substring(1, trimmed.length - 1)
+          .split('|')
+          .map((s) => s.trim());
+        tableAlignments = alignTokens.map((tok) => {
+          const leftColon = tok.startsWith(':');
+          const rightColon = tok.endsWith(':');
+          if (leftColon && rightColon) return 'center';
+          if (rightColon) return 'right';
+          return 'left';
+        });
         continue;
       }
       flushList();
@@ -364,27 +439,45 @@ export function parseMarkdownToHtml(
  * **negrita**, *cursiva*, ~~tachado~~, `código inline`, [enlace](url)
  */
 export function parseInlineMarkdown(text: string): string {
-  let output = escapeHtml(text);
+  if (!text) return '';
 
-  // Código en línea: `código`
-  output = output.replace(/`([^`]+)`/g, '<code class="bg-slate-800/80 text-indigo-300 px-1.5 py-0.5 rounded text-xs font-mono">$1</code>');
+  const codeSpans: string[] = [];
+  // 1. Proteger bloques de código en línea `...` con placeholders
+  // para que identificadores snake_case o caracteres especiales dentro de código NUNCA
+  // sean alterados por cursivas/negritas ni generen HTML malformado / intercalado.
+  const protectedText = text.replace(/`([^`]+)`/g, (_match, codeContent) => {
+    const idx = codeSpans.length;
+    codeSpans.push(
+      `<code class="bg-slate-800/80 text-indigo-300 px-1.5 py-0.5 rounded text-xs font-mono">${escapeHtml(codeContent)}</code>`
+    );
+    return `@@SF_CODESPAN_${idx}@@`;
+  });
 
-  // Negrita: **texto** o __texto__
+  // 2. Escapar HTML del texto fuera de los bloques de código protegidos
+  let output = escapeHtml(protectedText);
+
+  // 3. Negrita: **texto** o __texto__ (respetando límites para evitar romper snake_case)
   output = output.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  output = output.replace(/__(.*?)__/g, '<strong>$1</strong>');
+  output = output.replace(/(?<=^|[\s(])__(.+?)__(?=[\s).,;:!?]|$)/g, '<strong>$1</strong>');
 
-  // Cursiva: *texto* o _texto_
-  output = output.replace(/\*(.*?)\*/g, '<em>$1</em>');
-  output = output.replace(/_(.*?)_/g, '<em>$1</em>');
+  // 4. Cursiva: *texto* o _texto_ (solo con límites de palabras para preservar snake_case)
+  output = output.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  output = output.replace(/(?<=^|[\s(])_([^_]+)_(?=[\s).,;:!?]|$)/g, '<em>$1</em>');
 
-  // Tachado: ~~texto~~
+  // 5. Tachado: ~~texto~~
   output = output.replace(/~~(.*?)~~/g, '<del class="line-through text-slate-500">$1</del>');
 
-  // Enlaces: [texto](url)
+  // 6. Enlaces: [texto](url)
   output = output.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-indigo-400 underline hover:text-indigo-300">$1</a>'
   );
+
+  // 7. Restaurar los códigos en línea protegidos e intactos
+  output = output.replace(/@@SF_CODESPAN_(\d+)@@/g, (_match, idxStr) => {
+    const idx = parseInt(idxStr, 10);
+    return codeSpans[idx] || '';
+  });
 
   return output;
 }

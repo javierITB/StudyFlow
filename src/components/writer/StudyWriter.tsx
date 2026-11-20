@@ -34,8 +34,10 @@ import {
   StudyWorkDraft,
 } from '../../types/studyflow';
 import { exportHtmlToDocx, exportHtmlToMarkdown, exportHtmlToPdf, printFormattedDocument } from '../../lib/docxExport';
-import { BookOpen, Clock, Expand, FileText, Target, ZoomIn, ZoomOut } from 'lucide-react';
+import { BookOpen, Clock, Columns, Expand, FileText, ListTree, Target, ZoomIn, ZoomOut } from 'lucide-react';
 import { useTimer } from '../../context/TimerContext';
+import { DocumentOutlineDrawer } from './DocumentOutlineDrawer';
+import { ParallelContinuationSheet } from './ParallelContinuationSheet';
 
 interface StudyWriterProps {
   works: StudyWorkDraft[];
@@ -103,11 +105,32 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
     pageCount: number;
     currentPage: number;
     lastPageFillerPx: number;
+    breakPositions?: number[];
   }>({
     pageCount: 1,
     currentPage: 1,
     lastPageFillerPx: 760,
+    breakPositions: [],
   });
+
+  const [isOutlineOpen, setIsOutlineOpen] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.localStorage.getItem('sf_writer_outline_open') === 'true';
+    }
+    return false;
+  });
+
+  const [isParallelView, setIsParallelView] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem('sf_writer_outline_open', String(isOutlineOpen));
+      } catch {
+        // ignore storage errors
+      }
+    }
+  }, [isOutlineOpen]);
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
   const [citationsOpen, setCitationsOpen] = useState<boolean>(false);
   const [internalTemplatesOpen, setInternalTemplatesOpen] = useState<boolean>(false);
@@ -362,11 +385,45 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   const handleZoomFit = useCallback(() => {
     if (!workspaceContainerRef.current) return;
     const available = workspaceContainerRef.current.clientWidth - 48; // padding lateral
-    const paperPx = paperFormat === 'a4' ? 794 : 816;
-    const target = Math.min(1.2, Math.max(0.55, available / paperPx));
+    const singlePaperPx = paperFormat === 'a4' ? 794 : 816;
+    const requiredWidth = isParallelView && isPagedMode ? singlePaperPx * 2 + 32 : singlePaperPx;
+    const target = Math.min(1.2, Math.max(0.35, available / requiredWidth));
     setZoomLevel(Number(target.toFixed(2)));
     onNotify(`Vista adaptada (${Math.round(target * 100)}%)`, 'info');
-  }, [paperFormat, onNotify]);
+  }, [paperFormat, isParallelView, isPagedMode, onNotify]);
+
+  // Navegar suavemente hacia una página específica del documento
+  const handleNavigateToPage = useCallback(
+    (targetPage: number) => {
+      if (!editor || !workspaceContainerRef.current) return;
+      const breaks = pageInfo.breakPositions || [];
+      const targetPos = targetPage <= 1 ? 0 : (breaks[targetPage - 2] ?? 0);
+      editor.chain().focus().setTextSelection(targetPos).run();
+
+      try {
+        const dom = editor.view.nodeDOM(targetPos);
+        if (dom instanceof HTMLElement) {
+          dom.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+      } catch {
+        // fallback
+      }
+
+      try {
+        const coords = editor.view.coordsAtPos(targetPos);
+        if (coords && workspaceContainerRef.current) {
+          const container = workspaceContainerRef.current;
+          const rect = container.getBoundingClientRect();
+          const targetTop = container.scrollTop + (coords.top - rect.top) - 60;
+          container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+        }
+      } catch {
+        // fallback
+      }
+    },
+    [editor, pageInfo.breakPositions]
+  );
 
   // Insertar cita del drawer
   const handleInsertCitation = useCallback(
@@ -737,6 +794,14 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
       <TableControlBar editor={editor} />
 
       <div className="flex-1 flex overflow-hidden relative">
+        {/* Panel Izquierdo: Índice de Títulos (Colapsable y Minimalista) */}
+        <DocumentOutlineDrawer
+          isOpen={isOutlineOpen}
+          onToggle={() => setIsOutlineOpen((v) => !v)}
+          editor={editor}
+          containerRef={workspaceContainerRef}
+        />
+
         {/* Área Central: Escritorio de Edición con Adaptabilidad y Hojas Reales */}
         <div
           ref={workspaceContainerRef}
@@ -745,7 +810,12 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
           {/* Barra Superior Integrada del Documento: Formato, Título y Páginas */}
           <div
             className="w-full mb-4 flex items-center justify-between gap-3 select-none transition-all"
-            style={{ maxWidth: `${paperPixelWidth}px` }}
+            style={{
+              maxWidth:
+                isParallelView && isPagedMode
+                  ? `${paperPixelWidth * 2 + 48}px`
+                  : `${paperPixelWidth}px`,
+            }}
           >
             <div className="flex-1 flex items-center gap-2.5">
               <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-indigo-300 bg-indigo-500/15 border border-indigo-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm">
@@ -769,6 +839,21 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Botón de Índice de Títulos */}
+              <button
+                type="button"
+                onClick={() => setIsOutlineOpen((v) => !v)}
+                className={`h-8 px-2.5 rounded-xl border text-xs font-mono flex items-center gap-1.5 transition-colors shadow-sm ${
+                  isOutlineOpen
+                    ? 'bg-indigo-600/30 border-indigo-500/60 text-indigo-200'
+                    : 'bg-slate-900/90 border-slate-700/80 hover:border-slate-600 text-slate-300 hover:text-white'
+                }`}
+                title="Mostrar u ocultar el índice y árbol de títulos"
+              >
+                <ListTree className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="hidden md:inline">Índice</span>
+              </button>
+
               {isPagedMode && (
                 <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-slate-300 bg-slate-900/90 border border-slate-700/80 px-3 py-1.5 rounded-xl shadow-sm">
                   <span>Pág.</span>
@@ -796,7 +881,10 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
             style={{
               transform: `scale(${zoomLevel})`,
               width: zoomLevel > 1 ? `${zoomLevel * 100}%` : '100%',
-              maxWidth: `${paperPixelWidth}px`,
+              maxWidth:
+                isParallelView && isPagedMode
+                  ? `${paperPixelWidth * 2 + 48}px`
+                  : `${paperPixelWidth}px`,
             }}
           >
             <style>{`
@@ -1024,6 +1112,8 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
                 position: relative !important;
                 box-sizing: border-box !important;
                 min-width: 25px;
+                overflow-wrap: anywhere;
+                word-break: break-word;
               }
 
               .ProseMirror td {
@@ -1035,6 +1125,8 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
                 position: relative !important;
                 box-sizing: border-box !important;
                 min-width: 25px;
+                overflow-wrap: anywhere;
+                word-break: break-word;
               }
 
               .ProseMirror tr:nth-child(even) td {
@@ -1177,62 +1269,88 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
               }
             `}</style>
 
-            {/* Hoja de Edición Live: Paginada (altura física fija) o Continua */}
+            {/* Contenedor Flex: Si está en paralelo muestra Hoja Principal (izquierda) y Hoja de Continuación (derecha) */}
             <div
-              className="visual-page"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget && editor) {
-                  // Calcular la posición exacta del documento correspondiente a las coordenadas (X, Y)
-                  // evitando saltar al final del documento si el usuario pulsa en los márgenes
-                  const domRect = editor.view.dom.getBoundingClientRect();
-                  const targetX = Math.max(domRect.left + 2, Math.min(domRect.right - 2, e.clientX));
-                  const pos = editor.view.posAtCoords({ left: targetX, top: e.clientY });
-                  if (pos && typeof pos.pos === 'number') {
-                    e.preventDefault();
-                    editor.chain().focus().setTextSelection(pos.pos).run();
-                  }
-                }
-              }}
+              className={`w-full flex ${
+                isParallelView && isPagedMode
+                  ? 'flex-row justify-center items-start gap-6 lg:gap-8'
+                  : 'flex-col items-center'
+              }`}
             >
-              <FloatingFormatMenu editor={editor} />
-              <EditorContent editor={editor} />
+              {/* Hoja de Edición Live Principal */}
+              <div
+                className="visual-page"
+                style={{
+                  maxWidth: `${paperPixelWidth}px`,
+                }}
+                onMouseDown={(e) => {
+                  if (e.target === e.currentTarget && editor) {
+                    // Calcular la posición exacta del documento correspondiente a las coordenadas (X, Y)
+                    // evitando saltar al final del documento si el usuario pulsa en los márgenes
+                    const domRect = editor.view.dom.getBoundingClientRect();
+                    const targetX = Math.max(domRect.left + 2, Math.min(domRect.right - 2, e.clientX));
+                    const pos = editor.view.posAtCoords({ left: targetX, top: e.clientY });
+                    if (pos && typeof pos.pos === 'number') {
+                      e.preventDefault();
+                      editor.chain().focus().setTextSelection(pos.pos).run();
+                    }
+                  }
+                }}
+              >
+                <FloatingFormatMenu editor={editor} />
+                <EditorContent editor={editor} />
 
-              {/* Relleno de altura fija de la última hoja y pie de página */}
-              {isPagedMode && (
-                <>
-                  <div
-                    className="last-page-spacer cursor-text"
-                    style={{ height: `${pageInfo.lastPageFillerPx}px` }}
-                    onMouseDown={(e) => {
-                      if (editor) {
-                        e.preventDefault();
-                        const domRect = editor.view.dom.getBoundingClientRect();
-                        const targetX = Math.max(domRect.left + 2, Math.min(domRect.right - 2, e.clientX));
-                        const pos = editor.view.posAtCoords({ left: targetX, top: e.clientY });
-                        if (pos && typeof pos.pos === 'number') {
-                          editor.chain().focus().setTextSelection(pos.pos).run();
-                        } else {
-                          editor.commands.focus('end');
+                {/* Relleno de altura fija de la última hoja y pie de página */}
+                {isPagedMode && (
+                  <>
+                    <div
+                      className="last-page-spacer cursor-text"
+                      style={{ height: `${pageInfo.lastPageFillerPx}px` }}
+                      onMouseDown={(e) => {
+                        if (editor) {
+                          e.preventDefault();
+                          const domRect = editor.view.dom.getBoundingClientRect();
+                          const targetX = Math.max(domRect.left + 2, Math.min(domRect.right - 2, e.clientX));
+                          const pos = editor.view.posAtCoords({ left: targetX, top: e.clientY });
+                          if (pos && typeof pos.pos === 'number') {
+                            editor.chain().focus().setTextSelection(pos.pos).run();
+                          } else {
+                            editor.commands.focus('end');
+                          }
                         }
-                      }
-                    }}
-                  />
-                  <div
-                    className="py-3.5 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-400 font-mono select-none"
-                    style={{
-                      marginLeft: 'calc(-1 * var(--sheet-pad-x))',
-                      marginRight: 'calc(-1 * var(--sheet-pad-x))',
-                      paddingLeft: 'var(--sheet-pad-x)',
-                      paddingRight: 'var(--sheet-pad-x)',
-                      paddingBottom: '20px',
-                    }}
-                  >
-                    <span>StudyFlexConnect · Redacción Académica</span>
-                    <span className="font-semibold text-slate-500">
-                      Página {pageInfo.pageCount} (Fin de documento)
-                    </span>
-                  </div>
-                </>
+                      }}
+                    />
+                    <div
+                      className="py-3.5 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-400 font-mono select-none"
+                      style={{
+                        marginLeft: 'calc(-1 * var(--sheet-pad-x))',
+                        marginRight: 'calc(-1 * var(--sheet-pad-x))',
+                        paddingLeft: 'var(--sheet-pad-x)',
+                        paddingRight: 'var(--sheet-pad-x)',
+                        paddingBottom: '20px',
+                      }}
+                    >
+                      <span>StudyFlexConnect · Redacción Académica</span>
+                      <span className="font-semibold text-slate-500">
+                        Página {pageInfo.pageCount} (Fin de documento)
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Hoja de Continuación en Paralelo (vista de 2 páginas lado a lado) */}
+              {isParallelView && isPagedMode && (
+                <ParallelContinuationSheet
+                  currentPage={pageInfo.currentPage}
+                  totalPages={pageInfo.pageCount}
+                  paperFormat={paperFormat}
+                  editor={editor}
+                  breakPositions={pageInfo.breakPositions}
+                  onClose={() => setIsParallelView(false)}
+                  onNavigateToPage={handleNavigateToPage}
+                  paperPixelWidth={paperPixelWidth}
+                />
               )}
             </div>
           </div>
@@ -1316,7 +1434,13 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
           {/* Switch Modo Hojas Paginadas vs Continuo */}
           <button
             type="button"
-            onClick={() => setIsPagedMode((v) => !v)}
+            onClick={() => {
+              setIsPagedMode((v) => {
+                const next = !v;
+                if (!next) setIsParallelView(false);
+                return next;
+              });
+            }}
             className={`h-7 px-2 rounded-lg border text-[10.5px] font-medium flex items-center gap-1 transition-all ${
               isPagedMode
                 ? 'bg-indigo-600/30 border-indigo-500/50 text-indigo-200 shadow-sm'
@@ -1331,6 +1455,35 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
             <BookOpen className="w-3 h-3 text-indigo-400" />
             <span className="hidden sm:inline">{isPagedMode ? 'Hojas' : 'Continuo'}</span>
           </button>
+
+          {/* Switch Hojas en Paralelo (dos páginas lado a lado para ver la continuación) */}
+          {isPagedMode && (
+            <button
+              type="button"
+              onClick={() => {
+                setIsParallelView((v) => {
+                  const next = !v;
+                  if (next) {
+                    onNotify('Vista de 2 hojas en paralelo activada (pliego de lectura)', 'info');
+                  }
+                  return next;
+                });
+              }}
+              className={`h-7 px-2 rounded-lg border text-[10.5px] font-medium flex items-center gap-1 transition-all ${
+                isParallelView
+                  ? 'bg-cyan-600/30 border-cyan-500/50 text-cyan-200 shadow-sm'
+                  : 'bg-slate-950/80 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600'
+              }`}
+              title={
+                isParallelView
+                  ? 'Modo actual: 2 Hojas en Paralelo. Clic para volver a 1 hoja.'
+                  : 'Clic para ver 2 hojas en paralelo (continuación a la derecha).'
+              }
+            >
+              <Columns className="w-3 h-3 text-cyan-400" />
+              <span className="hidden sm:inline">{isParallelView ? '2 Hojas' : '1 Hoja'}</span>
+            </button>
+          )}
 
           {/* Selector de Papel Físico: Carta (216x279), Oficio (216x330), A4 (210x297) */}
           <div className="flex items-center bg-slate-950/80 border border-slate-700/80 rounded-lg px-1.5 h-7">

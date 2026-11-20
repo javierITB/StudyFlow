@@ -20,6 +20,7 @@ import {
   Users,
   Volume2,
   VolumeX,
+  MessageSquarePlus,
 } from 'lucide-react';
 import { useTimer } from '../context/TimerContext';
 import {
@@ -50,6 +51,7 @@ interface NavbarProps {
   onOpenFriendsModal: () => void;
   onOpenAppearanceModal: () => void;
   onOpenTutorial: () => void;
+  onOpenFeedbackModal?: () => void;
   notificationsSlot?: React.ReactNode;
   hideBrandOnDesktop?: boolean;
   layoutStyle?: LayoutStyleId;
@@ -70,6 +72,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenFriendsModal,
   onOpenAppearanceModal,
   onOpenTutorial,
+  onOpenFeedbackModal,
   notificationsSlot,
   hideBrandOnDesktop = false,
   layoutStyle = 'islands',
@@ -340,6 +343,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <Palette className="w-3.5 h-3.5 text-indigo-400" />
                 </button>
 
+                {onOpenFeedbackModal && (
+                  <button
+                    type="button"
+                    onClick={onOpenFeedbackModal}
+                    title="Buzón de sugerencias y opiniones al administrador"
+                    aria-label="Buzón de sugerencias"
+                    className="p-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-200 transition-colors"
+                  >
+                    <MessageSquarePlus className="w-3.5 h-3.5 text-emerald-400" />
+                  </button>
+                )}
+
                 {user && (
                   <>
                     {notificationsSlot}
@@ -523,6 +538,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="hidden xl:inline text-xs font-medium">Amigos</span>
             </button>
           </>
+        )}
+
+        {onOpenFeedbackModal && (
+          <button
+            type="button"
+            onClick={onOpenFeedbackModal}
+            title="Buzón de sugerencias y opiniones al administrador"
+            aria-label="Buzón de sugerencias"
+            className="flex items-center gap-1 p-1.5 xl:px-2 xl:py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 transition-colors"
+          >
+            <MessageSquarePlus className="w-4 h-4 text-emerald-400" />
+            <span className="hidden xl:inline text-xs font-medium">Feedback</span>
+          </button>
         )}
 
         <button

@@ -13,6 +13,7 @@ export interface AutoPaginationOptions {
     currentPage: number;
     lastPageFillerPx: number;
     paperFormat: PaginationPaperFormat;
+    breakPositions?: number[];
   }) => void;
 }
 
@@ -261,6 +262,7 @@ export const AutoPaginationExtension = Extension.create<AutoPaginationOptions>({
                   currentPage: 1,
                   lastPageFillerPx: 0,
                   paperFormat,
+                  breakPositions: [],
                 });
               }
               return;
@@ -418,6 +420,7 @@ export const AutoPaginationExtension = Extension.create<AutoPaginationOptions>({
                 currentPage: cursorPage,
                 lastPageFillerPx,
                 paperFormat,
+                breakPositions,
               });
             } finally {
               isMeasuring = false;

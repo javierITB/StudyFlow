@@ -39,15 +39,38 @@ describe('markdownParser', () => {
     expect(html).toContain('Segunda página');
   });
 
-  it('convierte tablas de Markdown a tablas HTML nativas', () => {
-    const md = '| Parámetro | Muestra A | Muestra B |\n|---|---|---|\n| Rendimiento | 84.5% | 91.2% |';
+  it('procesa correctamente tablas complejas con código snake_case, alineaciones y anchos balanceados sin romper celdas', () => {
+    const md = `### 1.2. Matriz General de Permisos RBAC por Módulo
+
+| Sección / Módulo | Vista Operativa | Permiso Canónico (ID) | Cliente | Contador | Admin | BigBoss |
+|---|---|---|:---:|:---:|:---:|:---:|
+| **Informes** | Formulario 29 (F29) | \`view_formulario_29\` / \`edit_formulario_29\` | VER | SÍ | SÍ | ALL |
+| **Herramientas** | Tareas Encoladas | \`view_tareas_encoladas\` / \`edit_tareas_encoladas\` | — | SÍ | SÍ | ALL |
+| **Herramientas** | Carga Masiva Movimientos | \`view_carga_masiva_movimientos\` / \`bulk_create_movimientos\` | — | SÍ | SÍ | ALL |
+| **Herramientas** | Carga Masiva Vouchers | \`view_carga_masiva_vouchers\` / \`bulk_create_vouchers\` | — | SÍ | SÍ | ALL |
+| **Admin** | Roles y Permisos | \`view_gestor_roles\` / \`create_gestor_roles\` / \`edit_gestor_roles\` | — | — | SÍ | ALL |
+| **SaaS BigBoss** | Gestión Global Tenants | \`view_plan_cuentas\` / \`isSystemOnly\` (GodMode) | — | — | — | SÍ |`;
+
     const html = parseMarkdownToHtml(md);
 
+    // 1. Debe contener estructura de tabla
     expect(html).toContain('<table class="studyflow-table');
-    expect(html).toContain('<th');
-    expect(html).toContain('Parámetro');
-    expect(html).toContain('<td');
-    expect(html).toContain('84.5%');
+    expect(html).toContain('1.2. Matriz General de Permisos RBAC por Módulo');
+
+    // 2. Códigos snake_case no deben contener etiquetas <em> intercaladas ni estar corruptos
+    expect(html).toContain('view_formulario_29');
+    expect(html).toContain('view_carga_masiva_movimientos');
+    expect(html).toContain('bulk_create_movimientos');
+    expect(html).not.toMatch(/<code[^>]*>[^<]*<em>/);
+    expect(html).not.toMatch(/<em>[^<]*<\/code>/);
+
+    // 3. Encabezados deben tener ancho suficiente para no cortar palabras en sílabas (Contador >= 95, BigBoss >= 90)
+    expect(html).toMatch(/<th[^>]*colwidth="1\d\d"[^>]*>.*Contador<\/th>/);
+    expect(html).toMatch(/<th[^>]*colwidth="9\d"[^>]*>.*BigBoss<\/th>/);
+
+    // 4. Debe respetar alineaciones centradas indicadas por :---: en la fila separadora
+    expect(html).toMatch(/<th[^>]*text-center[^>]*style="text-align: center;"[^>]*>.*Contador<\/th>/);
+    expect(html).toMatch(/<td[^>]*text-center[^>]*style="text-align: center;"[^>]*>SÍ<\/td>/);
   });
 
   it('convierte listas con viñetas y ordenadas', () => {
