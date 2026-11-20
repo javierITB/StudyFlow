@@ -12,6 +12,11 @@ export interface StudyWorkDraft {
   updatedAt: string;
   linkedDocId?: string | null;
   paperSize?: 'letter' | 'legal' | 'a4';
+  ownerId?: string;
+  ownerUsername?: string | null;
+  sharedRole?: 'owner' | 'collaborator' | 'viewer';
+  shareId?: string;
+  isShared?: boolean;
 }
 
 export type FolderColor = 'indigo' | 'emerald' | 'amber' | 'rose' | 'sky' | 'purple';
@@ -516,6 +521,72 @@ export interface CollaboratorPresence {
   fullName: string;
   page: number;
   onlineAt: string;
+}
+
+export interface WorkShareRecord {
+  id: string;
+  workId: string;
+  ownerId: string;
+  recipientId: string;
+  shareMode: ShareMode;
+  role: ShareRole;
+  status: ShareStatus;
+  createdAt: string;
+  updatedAt: string;
+  workTitle?: string;
+  wordCount?: number;
+  paperSize?: 'letter' | 'legal' | 'a4';
+  ownerProfile?: PublicProfile;
+  recipientProfile?: PublicProfile;
+}
+
+export interface WorkShareLinkRecord {
+  id: string;
+  token: string;
+  workId: string;
+  ownerId: string;
+  shareMode: ShareMode;
+  role: ShareRole;
+  revoked: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface RedeemedWorkShareLinkResult {
+  shareId: string;
+  workId: string;
+  workTitle: string;
+  contentHtml: string;
+  contentText?: string;
+  wordCount: number;
+  paperSize?: 'letter' | 'legal' | 'a4';
+  targetWordCount?: number | null;
+  tags?: string[];
+  ownerId: string;
+  ownerUsername: string | null;
+  shareMode: ShareMode;
+  role: ShareRole;
+  status: ShareStatus;
+}
+
+export interface WorkCollaboratorPresence {
+  userId: string;
+  username: string;
+  fullName: string;
+  onlineAt: string;
+}
+
+export interface WorkCollabBroadcastPayload {
+  type: 'work_content_update';
+  workId: string;
+  contentHtml: string;
+  contentText?: string;
+  title?: string;
+  paperSize?: 'letter' | 'legal' | 'a4';
+  wordCount: number;
+  senderId: string;
+  senderName: string;
+  timestamp: string;
 }
 
 // ============================================================================

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  acceptWorkCopy,
+  buildWorkShareUrl,
   canDeleteNote,
   canEditNote,
   extractShareTokenFromSearch,
+  extractWorkShareTokenFromSearch,
   isEmailIdentifier,
   normalizeUsername,
   validateUsernameFormat,
@@ -31,11 +34,41 @@ describe('Collaboration & Username helpers', () => {
     expect(isEmailIdentifier('@vicho_udp')).toBe(false);
   });
 
-  it('extrae el token de enlaces compartidos (?share=...)', () => {
+  it('extrae el token de enlaces compartidos (?share=...) y redacciones (?shareWork=...)', () => {
     expect(extractShareTokenFromSearch('?share=abc123xyz')).toBe('abc123xyz');
     expect(extractShareTokenFromSearch('?foo=1&share=tk_998')).toBe('tk_998');
     expect(extractShareTokenFromSearch('?foo=1')).toBeNull();
     expect(extractShareTokenFromSearch('')).toBeNull();
+
+    expect(extractWorkShareTokenFromSearch('?shareWork=collab_token_123')).toBe('collab_token_123');
+    expect(extractWorkShareTokenFromSearch('?foo=bar&shareWork=xyz_888&other=1')).toBe('xyz_888');
+    expect(extractWorkShareTokenFromSearch('?share=doc_token')).toBeNull();
+    expect(extractWorkShareTokenFromSearch('')).toBeNull();
+
+    expect(buildWorkShareUrl('tk_456')).toContain('shareWork=tk_456');
+  });
+
+  it('genera una copia independiente de redacción que no altera el borrador original', async () => {
+    const originalWork = {
+      sourceWorkId: 'work-original-1',
+      workTitle: 'Tesis de Grado',
+      contentHtml: '<h2>Capítulo 1</h2><p>Contenido del autor original</p>',
+      contentText: 'Capítulo 1 Contenido del autor original',
+      wordCount: 150,
+      targetWordCount: 5000,
+      tags: ['derecho', 'civil'],
+      paperSize: 'a4' as const,
+      recipientId: 'user-friend-99',
+    };
+
+    const cloned = await acceptWorkCopy(originalWork);
+
+    expect(cloned.id).not.toBe(originalWork.sourceWorkId);
+    expect(cloned.title).toBe('Tesis de Grado (Copia)');
+    expect(cloned.contentHtml).toBe(originalWork.contentHtml);
+    expect(cloned.wordCount).toBe(150);
+    expect(cloned.paperSize).toBe('a4');
+    expect(cloned.isShared).toBe(false);
   });
 
   it('aplica permisos correctos de edición y moderación en notas compartidas', () => {

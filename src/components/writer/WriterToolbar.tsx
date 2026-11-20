@@ -39,6 +39,7 @@ import {
   Redo2,
   Rows,
   Scissors,
+  Share2,
   SlidersHorizontal,
   Sparkles,
   Split,
@@ -51,8 +52,9 @@ import {
   Undo2,
   Unlink,
   UploadCloud,
+  Users,
 } from 'lucide-react';
-import { LayoutStyleId } from '../../types/studyflow';
+import { LayoutStyleId, WorkCollaboratorPresence } from '../../types/studyflow';
 import { parseMarkdownToHtml } from '../../lib/markdownParser';
 import { sanitizeAndPaginateOversizedNodes } from '../../lib/tiptap/CustomTableExtensions';
 
@@ -63,6 +65,10 @@ interface WriterToolbarProps {
   onToggleFullScreen: () => void;
   onOpenTemplates: () => void;
   onPublishTemplate?: () => void;
+  onShareWork?: () => void;
+  collaboratorsPresence?: WorkCollaboratorPresence[];
+  isSharedWork?: boolean;
+  sharedRole?: 'owner' | 'collaborator' | 'viewer';
   onBackToHub?: () => void;
   onToggleCitations: () => void;
   citationsOpen: boolean;
@@ -138,6 +144,10 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
   onToggleFullScreen,
   onOpenTemplates,
   onPublishTemplate,
+  onShareWork,
+  collaboratorsPresence = [],
+  isSharedWork = false,
+  sharedRole = 'owner',
   onBackToHub,
   onToggleCitations,
   citationsOpen,
@@ -1326,9 +1336,47 @@ export const WriterToolbar: React.FC<WriterToolbarProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* SECCIÓN DERECHA: PUBLICAR, PLANTILLAS, CITAS, A LECTURAS, EXPORTAR Y ESTADO */}
+      {/* SECCIÓN DERECHA: PUBLICAR, COMPARTIR, PLANTILLAS, CITAS, A LECTURAS, EXPORTAR Y ESTADO */}
       {/* ========================================================================= */}
       <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0 ml-auto">
+        {/* Presencia de colaboradores en tiempo real */}
+        {collaboratorsPresence && collaboratorsPresence.length > 0 && (
+          <div
+            className="h-7 px-2 rounded-lg bg-teal-500/15 border border-teal-500/35 text-teal-300 text-[11px] font-medium flex items-center gap-1.5"
+            title={`Colaboradores editando en vivo:\n${collaboratorsPresence.map((c) => c.username ? `@${c.username}` : c.fullName).join('\n')}`}
+          >
+            <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+            <span className="hidden sm:inline font-semibold">{collaboratorsPresence.length} en vivo</span>
+            <Users className="w-3.5 h-3.5 sm:hidden" />
+          </div>
+        )}
+
+        {/* Indicador de redacción compartida / rol */}
+        {isSharedWork && (
+          <div
+            className="h-7 px-2 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[10px] font-medium flex items-center gap-1"
+            title={sharedRole === 'viewer' ? 'Modo observador (solo lectura)' : 'Modo colaborativo'}
+          >
+            <Users className="w-3 h-3 text-indigo-400" />
+            <span className="hidden md:inline">
+              {sharedRole === 'viewer' ? 'Lectura' : 'Colaborativo'}
+            </span>
+          </div>
+        )}
+
+        {/* Compartir Redacción (en vivo o copia) */}
+        {onShareWork && (
+          <button
+            type="button"
+            onClick={onShareWork}
+            className="h-7 px-2.5 rounded-lg bg-teal-500/15 border border-teal-500/35 hover:bg-teal-500/25 text-teal-300 hover:text-teal-200 text-[11px] font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+            title="Compartir redacción: editar colaborativamente en vivo o enviar como copia"
+          >
+            <Share2 className="w-3.5 h-3.5 text-teal-400" />
+            <span className="hidden lg:inline">Compartir</span>
+          </button>
+        )}
+
         {/* Publicar en la Comunidad */}
         {onPublishTemplate && (
           <button

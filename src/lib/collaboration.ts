@@ -8,17 +8,25 @@ import {
   FriendshipStatus,
   PublicProfile,
   RedeemedShareLinkResult,
+  RedeemedWorkShareLinkResult,
   ShareLinkRecord,
   ShareMode,
   ShareRole,
   ShareStatus,
   StickyNoteRecord,
+  StudyWorkDraft,
+  WorkCollabBroadcastPayload,
+  WorkCollaboratorPresence,
+  WorkShareLinkRecord,
+  WorkShareRecord,
 } from '../types/studyflow';
 import {
   cloudUpsertDocument,
   cloudUpsertNote,
+  cloudUpsertWork,
   downloadDocumentBinaryFromCloud,
   mapNoteRow,
+  mapWorkRow,
   uploadDocumentBinaryToCloud,
 } from './cloudSync';
 import { dbPut } from './localDb';
@@ -94,6 +102,25 @@ export function buildShareUrl(token: string): string {
   url.search = '';
   url.hash = '';
   url.searchParams.set('share', token);
+  return url.toString();
+}
+
+export function extractWorkShareTokenFromSearch(search: string): string | null {
+  try {
+    const params = new URLSearchParams(search);
+    const token = params.get('shareWork')?.trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildWorkShareUrl(token: string): string {
+  if (typeof window === 'undefined') return `?shareWork=${encodeURIComponent(token)}`;
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('shareWork', token);
   return url.toString();
 }
 
@@ -790,9 +817,459 @@ export function subscribeToSocialNotifications(params: {
       },
       () => params.onRefreshNeeded()
     )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'work_shares',
+        filter: `recipient_id=eq.${params.userId}`,
+      },
+      () => params.onRefreshNeeded()
+    )
     .subscribe();
 
   return () => {
     void supabase?.removeChannel(channel);
+  };
+}
+
+// ============================================================================
+// COMPARTICIÓN Y COLABORACIÓN EN REDACCIÓN & TRABAJOS (StudyWorkDraft)
+// ============================================================================
+
+export async function shareWorkWithFriend(params: {
+  workId: string;
+  ownerId: string;
+  recipientId: string;
+  shareMode: ShareMode;
+  role: ShareRole;
+}): Promise<void> {
+  if (!supabase) throw new Error('Supabase no configurado');
+  const { error } = await supabase.from('work_shares').insert({
+    work_id: params.workId,
+    owner_id: params.ownerId,
+    recipient_id: params.recipientId,
+    share_mode: params.shareMode,
+    role: params.shareMode === 'copy' ? 'viewer' : params.role,
+    status: 'pending',
+  });
+  if (error) throw error;
+}
+
+export async function updateWorkShareStatusOrRole(
+  shareId: string,
+  patch: { status?: ShareStatus; role?: ShareRole }
+): Promise<void> {
+  if (!supabase) throw new Error('Supabase no configurado');
+  if (patch.status === 'revoked') {
+    const { error } = await supabase.from('work_shares').delete().eq('id', shareId);
+    if (error) throw error;
+    return;
+  }
+  const { error } = await supabase
+    .from('work_shares')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', shareId);
+  if (error) throw error;
+}
+
+export async function fetchOutgoingSharesForWork(
+  ownerId: string,
+  workId: string
+): Promise<WorkShareRecord[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('work_shares')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .eq('work_id', workId)
+    .neq('status', 'revoked')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  const rows = data || [];
+  const recipientIds = rows.map((r) => r.recipient_id as string);
+  const profilesMap = await fetchPublicProfilesMap(recipientIds);
+
+  return rows.map((r) => ({
+    id: r.id,
+    workId: r.work_id,
+    ownerId: r.owner_id,
+    recipientId: r.recipient_id,
+    shareMode: r.share_mode as ShareMode,
+    role: r.role as ShareRole,
+    status: r.status as ShareStatus,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    recipientProfile: profilesMap.get(r.recipient_id),
+  }));
+}
+
+export async function fetchIncomingWorkShares(
+  userId: string
+): Promise<WorkShareRecord[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('work_shares')
+    .select('*, study_works(id, title, word_count, paper_size)')
+    .eq('recipient_id', userId)
+    .neq('status', 'revoked')
+    .order('created_at', { ascending: false });
+
+  if (error) return [];
+  const rows = data || [];
+  const ownerIds = rows.map((r) => r.owner_id as string);
+  const profilesMap = await fetchPublicProfilesMap(ownerIds);
+
+  return rows.map((r) => {
+    const workObj = Array.isArray(r.study_works)
+      ? r.study_works[0]
+      : r.study_works;
+    return {
+      id: r.id,
+      workId: r.work_id,
+      ownerId: r.owner_id,
+      recipientId: r.recipient_id,
+      shareMode: r.share_mode as ShareMode,
+      role: r.role as ShareRole,
+      status: r.status as ShareStatus,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      workTitle: workObj?.title || 'Redacción compartida',
+      wordCount: Number(workObj?.word_count || 0),
+      paperSize: workObj?.paper_size || 'letter',
+      ownerProfile: profilesMap.get(r.owner_id),
+    };
+  });
+}
+
+export async function fetchSharedWorksWithMe(
+  userId: string
+): Promise<StudyWorkDraft[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('work_shares')
+    .select(
+      'id, work_id, owner_id, role, status, share_mode, study_works(*)'
+    )
+    .eq('recipient_id', userId)
+    .eq('share_mode', 'collaborative')
+    .eq('status', 'accepted');
+
+  if (error) return [];
+  const rows = data || [];
+  const ownerIds = rows.map((r) => r.owner_id as string);
+  const profilesMap = await fetchPublicProfilesMap(ownerIds);
+
+  const works: StudyWorkDraft[] = [];
+  for (const r of rows) {
+    const rawWork = Array.isArray(r.study_works) ? r.study_works[0] : r.study_works;
+    if (!rawWork) continue;
+    const mapped = mapWorkRow(rawWork as Record<string, unknown>);
+    const ownerProfile = profilesMap.get(r.owner_id);
+    works.push({
+      ...mapped,
+      ownerId: r.owner_id,
+      ownerUsername: ownerProfile?.username || ownerProfile?.fullName || null,
+      sharedRole: r.role as 'collaborator' | 'viewer',
+      shareId: r.id,
+      isShared: true,
+    });
+  }
+  return works;
+}
+
+export async function createWorkShareLink(params: {
+  workId: string;
+  ownerId: string;
+  shareMode: ShareMode;
+  role: ShareRole;
+  expiresInDays?: number | null;
+}): Promise<WorkShareLinkRecord> {
+  if (!supabase) throw new Error('Supabase no configurado');
+  const token = generateSecureToken();
+  const expiresAt =
+    params.expiresInDays && params.expiresInDays > 0
+      ? new Date(Date.now() + params.expiresInDays * 86_400_000).toISOString()
+      : null;
+
+  const { data, error } = await supabase
+    .from('work_share_links')
+    .insert({
+      token,
+      work_id: params.workId,
+      owner_id: params.ownerId,
+      share_mode: params.shareMode,
+      role: params.shareMode === 'copy' ? 'viewer' : params.role,
+      expires_at: expiresAt,
+    })
+    .select('*')
+    .single();
+
+  if (error || !data) throw error || new Error('No se pudo generar el enlace');
+  return {
+    id: data.id,
+    token: data.token,
+    workId: data.work_id,
+    ownerId: data.owner_id,
+    shareMode: data.share_mode as ShareMode,
+    role: data.role as ShareRole,
+    revoked: Boolean(data.revoked),
+    expiresAt: data.expires_at,
+    createdAt: data.created_at,
+  };
+}
+
+export async function fetchWorkShareLinks(
+  ownerId: string,
+  workId: string
+): Promise<WorkShareLinkRecord[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('work_share_links')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .eq('work_id', workId)
+    .eq('revoked', false)
+    .order('created_at', { ascending: false });
+
+  if (error) return [];
+  return (data || []).map((row) => ({
+    id: row.id,
+    token: row.token,
+    workId: row.work_id,
+    ownerId: row.owner_id,
+    shareMode: row.share_mode as ShareMode,
+    role: row.role as ShareRole,
+    revoked: Boolean(row.revoked),
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+  }));
+}
+
+export async function revokeWorkShareLink(linkId: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase no configurado');
+  const { error } = await supabase
+    .from('work_share_links')
+    .update({ revoked: true })
+    .eq('id', linkId);
+  if (error) throw error;
+}
+
+export async function redeemWorkShareLink(token: string): Promise<RedeemedWorkShareLinkResult> {
+  if (!supabase) throw new Error('Supabase no configurado');
+  const { data, error } = await supabase.rpc('redeem_work_share_link', {
+    p_token: token,
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error('ENLACE_INVALIDO_O_EXPIRADO');
+  return {
+    shareId: row.share_id,
+    workId: row.work_id,
+    workTitle: row.work_title,
+    contentHtml: row.content_html,
+    contentText: row.content_text,
+    wordCount: Number(row.word_count || 0),
+    paperSize: row.paper_size || 'letter',
+    targetWordCount: row.target_word_count ?? null,
+    tags: row.tags || [],
+    ownerId: row.owner_id,
+    ownerUsername: row.owner_username || null,
+    shareMode: row.share_mode as ShareMode,
+    role: row.role as ShareRole,
+    status: row.status as ShareStatus,
+  };
+}
+
+export async function acceptWorkCopy(params: {
+  shareId?: string;
+  sourceWorkId: string;
+  workTitle: string;
+  contentHtml: string;
+  contentText?: string;
+  wordCount: number;
+  targetWordCount?: number | null;
+  tags?: string[];
+  paperSize?: 'letter' | 'legal' | 'a4';
+  recipientId: string;
+}): Promise<StudyWorkDraft> {
+  const newWorkId = `work_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const now = new Date().toISOString();
+  const rawTitle = params.workTitle || 'Trabajo sin título';
+  const cloned: StudyWorkDraft = {
+    id: newWorkId,
+    title: rawTitle.endsWith('(Copia)') ? rawTitle : `${rawTitle} (Copia)`,
+    contentHtml: params.contentHtml || '<p></p>',
+    contentText: params.contentText || '',
+    wordCount: params.wordCount || 0,
+    targetWordCount: params.targetWordCount ?? null,
+    tags: params.tags ? [...params.tags] : [],
+    paperSize: params.paperSize || 'letter',
+    createdAt: now,
+    updatedAt: now,
+    isShared: false,
+  };
+
+  if (typeof indexedDB !== 'undefined') {
+    await dbPut('works', cloned);
+  }
+  try {
+    await cloudUpsertWork(params.recipientId, cloned);
+  } catch (err) {
+    console.warn('No se pudo respaldar copia de trabajo en la nube inmediatamente:', err);
+  }
+
+  if (params.shareId && supabase) {
+    try {
+      await supabase
+        .from('work_shares')
+        .update({ status: 'accepted', updated_at: now })
+        .eq('id', params.shareId);
+    } catch {
+      // Silenciar si la tabla no está disponible
+    }
+  }
+
+  return cloned;
+}
+
+export async function acceptCollaborativeWork(params: {
+  shareId: string;
+  workId: string;
+  workTitle: string;
+  contentHtml: string;
+  contentText?: string;
+  wordCount: number;
+  paperSize?: 'letter' | 'legal' | 'a4';
+  targetWordCount?: number | null;
+  tags?: string[];
+  ownerId: string;
+  ownerUsername?: string | null;
+  role: ShareRole;
+}): Promise<StudyWorkDraft> {
+  const now = new Date().toISOString();
+  if (supabase) {
+    try {
+      await supabase
+        .from('work_shares')
+        .update({ status: 'accepted', updated_at: now })
+        .eq('id', params.shareId);
+    } catch {
+      // Silenciar si offline
+    }
+  }
+
+  const sharedDraft: StudyWorkDraft = {
+    id: params.workId,
+    title: params.workTitle || 'Trabajo sin título',
+    contentHtml: params.contentHtml || '<p></p>',
+    contentText: params.contentText || '',
+    wordCount: params.wordCount || 0,
+    targetWordCount: params.targetWordCount ?? null,
+    tags: params.tags || [],
+    paperSize: params.paperSize || 'letter',
+    createdAt: now,
+    updatedAt: now,
+    ownerId: params.ownerId,
+    ownerUsername: params.ownerUsername || null,
+    sharedRole: params.role,
+    shareId: params.shareId,
+    isShared: true,
+  };
+
+  if (typeof indexedDB !== 'undefined') {
+    await dbPut('works', sharedDraft);
+  }
+  return sharedDraft;
+}
+
+export function subscribeToWorkCollaboration(params: {
+  workId: string;
+  userId: string;
+  username: string;
+  fullName: string;
+  onPresenceChange: (peers: WorkCollaboratorPresence[]) => void;
+  onRemoteContentUpdate: (payload: WorkCollabBroadcastPayload) => void;
+}): {
+  broadcastContentUpdate: (payload: {
+    contentHtml: string;
+    contentText?: string;
+    title?: string;
+    paperSize?: 'letter' | 'legal' | 'a4';
+    wordCount: number;
+  }) => void;
+  unsubscribe: () => void;
+} {
+  if (!supabase) {
+    return {
+      broadcastContentUpdate: () => {},
+      unsubscribe: () => {},
+    };
+  }
+
+  const channelName = `work-collab:${params.workId}`;
+  const channel: RealtimeChannel = supabase.channel(channelName, {
+    config: {
+      presence: { key: params.userId },
+      broadcast: { self: false },
+    },
+  });
+
+  const emitPresence = () => {
+    const state = channel.presenceState<WorkCollaboratorPresence>();
+    const peers: WorkCollaboratorPresence[] = [];
+    for (const entries of Object.values(state)) {
+      if (entries && entries.length > 0) {
+        peers.push(entries[0]);
+      }
+    }
+    params.onPresenceChange(peers);
+  };
+
+  channel
+    .on('presence', { event: 'sync' }, emitPresence)
+    .on('presence', { event: 'join' }, emitPresence)
+    .on('presence', { event: 'leave' }, emitPresence)
+    .on('broadcast', { event: 'work_content_update' }, (msg) => {
+      const data = msg.payload as WorkCollabBroadcastPayload;
+      if (data && data.workId === params.workId && data.senderId !== params.userId) {
+        params.onRemoteContentUpdate(data);
+      }
+    })
+    .subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        await channel.track({
+          userId: params.userId,
+          username: params.username,
+          fullName: params.fullName,
+          onlineAt: new Date().toISOString(),
+        });
+      }
+    });
+
+  return {
+    broadcastContentUpdate: (content) => {
+      void channel.send({
+        type: 'broadcast',
+        event: 'work_content_update',
+        payload: {
+          type: 'work_content_update',
+          workId: params.workId,
+          contentHtml: content.contentHtml,
+          contentText: content.contentText,
+          title: content.title,
+          paperSize: content.paperSize,
+          wordCount: content.wordCount,
+          senderId: params.userId,
+          senderName: params.username || params.fullName || 'Colaborador',
+          timestamp: new Date().toISOString(),
+        },
+      });
+    },
+    unsubscribe: () => {
+      void supabase?.removeChannel(channel);
+    },
   };
 }

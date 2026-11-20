@@ -13,11 +13,13 @@ import {
   Pencil,
   Plus,
   Scale,
+  Share2,
   Sparkles,
   Star,
   Trash2,
   Upload,
   User,
+  Users,
   X,
 } from 'lucide-react';
 import { CommunityTemplateRecord, StudyWorkDraft } from '../../types/studyflow';
@@ -95,6 +97,7 @@ export interface TemplatesWelcomeHubProps {
   onOpenWork: (id: string) => void;
   onDeleteWork?: (id: string) => void;
   onRenameWork?: (id: string, newTitle: string) => void;
+  onShareWork?: (work: StudyWorkDraft) => void;
   isCreating?: boolean;
   creatingTemplateId?: string | null;
   currentUserId?: string | null;
@@ -110,6 +113,7 @@ export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
   onOpenWork,
   onDeleteWork,
   onRenameWork,
+  onShareWork,
   isCreating = false,
   creatingTemplateId = null,
   currentUserId,
@@ -409,10 +413,32 @@ export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
                                     {work.paperSize === 'legal' ? 'Oficio' : work.paperSize === 'a4' ? 'A4' : 'Carta'}
                                   </span>
                                 )}
+                                {work.isShared && (
+                                  <span
+                                    className="px-1.5 py-0.2 rounded bg-teal-500/15 border border-teal-500/30 text-[9px] font-medium text-teal-300 inline-flex items-center gap-1"
+                                    title={work.ownerUsername ? `Compartido por @${work.ownerUsername}` : 'Colaborativo'}
+                                  >
+                                    <Users className="w-2.5 h-2.5 text-teal-400" />
+                                    <span>Colab{work.ownerUsername ? ` @${work.ownerUsername}` : ''}</span>
+                                  </span>
+                                )}
                               </p>
                             </div>
 
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {onShareWork && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onShareWork(work);
+                                  }}
+                                  className="p-1 rounded-lg text-slate-400 hover:text-teal-300 hover:bg-slate-800"
+                                  title="Compartir redacción (en vivo o copia)"
+                                >
+                                  <Share2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               {onRenameWork && (
                                 <button
                                   type="button"

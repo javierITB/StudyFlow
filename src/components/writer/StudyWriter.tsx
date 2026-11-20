@@ -21,6 +21,7 @@ import { CitationsDrawer } from './CitationsDrawer';
 import { AcademicTemplatesModal, AcademicTemplate, ACADEMIC_TEMPLATES } from './AcademicTemplatesModal';
 import { TemplatesWelcomeHub } from './TemplatesWelcomeHub';
 import { PublishTemplateModal } from './PublishTemplateModal';
+import { ShareWorkModal } from './ShareWorkModal';
 import { ImportDocumentModal } from './ImportDocumentModal';
 import { FloatingImportProgress } from './FloatingImportProgress';
 import { prepareDocumentImport, ImportProgressState } from '../../lib/documentImportEngine';
@@ -29,11 +30,15 @@ import {
   CommunityTemplateRecord,
   DocumentRecord,
   FolderRecord,
+  FriendshipRecord,
   LayoutStyleId,
   StickyNoteRecord,
   StudyWorkDraft,
+  UserProfile,
+  WorkCollaboratorPresence,
 } from '../../types/studyflow';
 import { exportHtmlToDocx, exportHtmlToMarkdown, exportHtmlToPdf, printFormattedDocument } from '../../lib/docxExport';
+import { subscribeToWorkCollaboration } from '../../lib/collaboration';
 import { BookOpen, Clock, Columns, Expand, FileText, ListTree, Target, ZoomIn, ZoomOut } from 'lucide-react';
 import { useTimer } from '../../context/TimerContext';
 import { DocumentOutlineDrawer } from './DocumentOutlineDrawer';
@@ -50,6 +55,7 @@ interface StudyWriterProps {
   onCreateNewWork?: (template?: AcademicTemplate | null) => Promise<StudyWorkDraft>;
   onDeleteWork?: (id: string) => Promise<void>;
   onRenameWork?: (id: string, newTitle: string) => Promise<void> | void;
+  onShareWork?: (work: StudyWorkDraft) => void;
   onExportWorkToReadings: (work: StudyWorkDraft, targetFolderId: string | null) => Promise<void>;
   onNotify: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
   templatesOpen?: boolean;
@@ -60,7 +66,10 @@ interface StudyWriterProps {
   onSetExportFolderModalOpen?: (open: boolean) => void;
   layoutStyle?: LayoutStyleId;
   currentUser?: { id: string; name?: string; username?: string | null } | null;
+  userProfile?: UserProfile | null;
+  friendships?: FriendshipRecord[];
   onOpenAccountModal?: () => void;
+  onOpenFriendsModal?: () => void;
 }
 
 export const StudyWriter: React.FC<StudyWriterProps> = ({
@@ -74,6 +83,7 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   onCreateNewWork,
   onDeleteWork,
   onRenameWork,
+  onShareWork: onShareWorkProp,
   onExportWorkToReadings,
   onNotify,
   templatesOpen: templatesOpenProp,
@@ -84,7 +94,10 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   onSetExportFolderModalOpen: onSetExportFolderModalOpenProp,
   layoutStyle = 'islands',
   currentUser,
+  userProfile,
+  friendships = [],
   onOpenAccountModal,
+  onOpenFriendsModal,
 }) => {
   const { isStopwatchActive, elapsedSeconds, remainingSeconds } = useTimer();
 
@@ -167,6 +180,32 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   const setExportFolderModalOpen =
     onSetExportFolderModalOpenProp ?? setInternalExportModalOpen;
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+
+  // Compartir redacción (en vivo / copia)
+  const [shareWorkModalOpen, setShareWorkModalOpen] = useState<boolean>(false);
+  const [shareWorkTarget, setShareWorkTarget] = useState<StudyWorkDraft | null>(null);
+
+  const handleOpenShare = (workToShare?: StudyWorkDraft) => {
+    const target = workToShare || activeWork;
+    if (!target) return;
+    if (!currentUser) {
+      onNotify('Inicia sesión para compartir redacciones y colaborar', 'info');
+      onOpenAccountModal?.();
+      return;
+    }
+    if (onShareWorkProp) {
+      onShareWorkProp(target);
+      return;
+    }
+    setShareWorkTarget(target);
+    setShareWorkModalOpen(true);
+  };
+
+  // Colaboración en tiempo real (Realtime Channel & Presence)
+  const [collabPeers, setCollabPeers] = useState<WorkCollaboratorPresence[]>([]);
+  const isRemoteUpdateRef = useRef<boolean>(false);
+  const collabSubscriptionRef = useRef<ReturnType<typeof subscribeToWorkCollaboration> | null>(null);
+  const broadcastDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Control de creación y prevención de duplicados al pulsar plantillas
   const [isCreatingWork, setIsCreatingWork] = useState<boolean>(false);
@@ -276,8 +315,8 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
     },
     content: activeWork?.contentHtml || '<p>Comienza a redactar tu trabajo...</p>',
     onUpdate: ({ editor }) => {
-      // 1. Silenciar si estamos cambiando de documento o transmitiendo bloques
-      if (isSwitchingWorkRef.current) {
+      // 1. Silenciar si estamos cambiando de documento o si es una actualización remota colaborativa
+      if (isSwitchingWorkRef.current || isRemoteUpdateRef.current) {
         return;
       }
 
@@ -302,6 +341,22 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         updatedAt: new Date().toISOString(),
       };
       void onSaveWork(updated);
+
+      // 4. Emitir broadcast colaborativo debounced a compañeros en vivo
+      if (collabSubscriptionRef.current) {
+        if (broadcastDebounceRef.current) {
+          clearTimeout(broadcastDebounceRef.current);
+        }
+        broadcastDebounceRef.current = setTimeout(() => {
+          collabSubscriptionRef.current?.broadcastContentUpdate({
+            contentHtml: editor.getHTML(),
+            contentText: text,
+            title: titleRef.current || currentWork.title,
+            paperSize: paperFormatRef.current || currentWork.paperSize,
+            wordCount: words,
+          });
+        }, 250);
+      }
     },
   });
 
@@ -374,6 +429,10 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
       { emitUpdate: false }
     );
 
+    // Ajustar si el usuario tiene rol de solo lectura en documento colaborativo
+    const isReadOnly = activeWork.isShared === true && activeWork.sharedRole === 'viewer';
+    editor.setEditable(!isReadOnly);
+
     const text = editor.getText();
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
     sessionStartWordsRef.current = words;
@@ -387,6 +446,68 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
       }
     }, 60);
   }, [activeWork?.id, editor]);
+
+  // Suscripción silenciosa en tiempo real al canal de redacción colaborativa
+  useEffect(() => {
+    if (!activeWork?.id || !currentUser?.id) {
+      setCollabPeers([]);
+      return;
+    }
+
+    const sub = subscribeToWorkCollaboration({
+      workId: activeWork.id,
+      userId: currentUser.id,
+      username: currentUser.username || currentUser.name || 'Estudiante',
+      fullName: currentUser.name || 'Estudiante',
+      onPresenceChange: (peers) => {
+        setCollabPeers(peers.filter((p) => p.userId !== currentUser.id));
+      },
+      onRemoteContentUpdate: (payload) => {
+        if (!editorRef.current || payload.workId !== activeWorkRef.current?.id) return;
+
+        const currentHtml = editorRef.current.getHTML();
+        if (payload.contentHtml !== currentHtml) {
+          isRemoteUpdateRef.current = true;
+          editorRef.current.commands.setContent(payload.contentHtml, { emitUpdate: false });
+          isRemoteUpdateRef.current = false;
+        }
+
+        if (payload.title && payload.title !== titleRef.current) {
+          setTitle(payload.title);
+          titleRef.current = payload.title;
+        }
+
+        if (payload.paperSize && payload.paperSize !== paperFormatRef.current) {
+          setPaperFormat(payload.paperSize);
+          paperFormatRef.current = payload.paperSize;
+          if (editorRef.current.commands.setPaperFormat) {
+            editorRef.current.commands.setPaperFormat(payload.paperSize);
+          }
+        }
+
+        const currentW = activeWorkRef.current;
+        if (currentW) {
+          void onSaveWork({
+            ...currentW,
+            title: payload.title || currentW.title,
+            paperSize: payload.paperSize || currentW.paperSize,
+            contentHtml: payload.contentHtml,
+            contentText: payload.contentText || currentW.contentText,
+            wordCount: payload.wordCount || 0,
+            updatedAt: payload.timestamp || new Date().toISOString(),
+          });
+        }
+      },
+    });
+
+    collabSubscriptionRef.current = sub;
+
+    return () => {
+      sub.unsubscribe();
+      collabSubscriptionRef.current = null;
+      setCollabPeers([]);
+    };
+  }, [activeWork?.id, currentUser?.id, currentUser?.username, currentUser?.name, onSaveWork]);
 
   // Manejo de cambio de formato de papel (aplica a todo el documento completo y recuerda preferencia)
   const handleChangePaperFormat = (newFormat: 'letter' | 'legal' | 'a4') => {
@@ -413,6 +534,16 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         updatedAt: new Date().toISOString(),
       };
       void onSaveWork(updated);
+
+      if (collabSubscriptionRef.current) {
+        collabSubscriptionRef.current.broadcastContentUpdate({
+          contentHtml: editor.getHTML(),
+          contentText: editor.getText(),
+          title: titleRef.current || currentWork.title,
+          paperSize: newFormat,
+          wordCount: currentWork.wordCount,
+        });
+      }
     }
   };
 
@@ -441,6 +572,16 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
           updatedAt: new Date().toISOString(),
         };
         void onSaveWork(updated);
+
+        if (collabSubscriptionRef.current) {
+          collabSubscriptionRef.current.broadcastContentUpdate({
+            contentHtml: editor.getHTML(),
+            contentText: editor.getText(),
+            title: newTitle,
+            paperSize: paperFormatRef.current || targetWork.paperSize,
+            wordCount: targetWork.wordCount,
+          });
+        }
       }
     }, 250);
   };
@@ -468,6 +609,16 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
       updatedAt: new Date().toISOString(),
     };
     void onSaveWork(updated);
+
+    if (collabSubscriptionRef.current) {
+      collabSubscriptionRef.current.broadcastContentUpdate({
+        contentHtml: editor.getHTML(),
+        contentText: editor.getText(),
+        title: trimmed,
+        paperSize: paperFormatRef.current || currentWork.paperSize,
+        wordCount: currentWork.wordCount,
+      });
+    }
   };
 
   useEffect(() => {
@@ -873,11 +1024,39 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
           onOpenWork={(id) => onSelectWork?.(id)}
           onDeleteWork={onDeleteWork}
           onRenameWork={onRenameWork}
+          onShareWork={(work) => handleOpenShare(work)}
           onOpenImportModal={() => setIsImportModalOpen(true)}
           isCreating={isCreatingWork}
           creatingTemplateId={creatingTemplateId}
           currentUserId={currentUser?.id}
           onOpenAuthModal={onOpenAccountModal}
+          onNotify={onNotify}
+        />
+
+        {/* Modal de Compartición de Redacción (en vivo / copia) */}
+        <ShareWorkModal
+          open={shareWorkModalOpen}
+          work={shareWorkTarget}
+          user={
+            userProfile ||
+            (currentUser
+              ? {
+                  id: currentUser.id,
+                  email: '',
+                  fullName: currentUser.name || '',
+                  username: currentUser.username || null,
+                }
+              : null)
+          }
+          friendships={friendships}
+          onClose={() => {
+            setShareWorkModalOpen(false);
+            setShareWorkTarget(null);
+          }}
+          onOpenFriendsModal={() => {
+            setShareWorkModalOpen(false);
+            onOpenFriendsModal?.();
+          }}
           onNotify={onNotify}
         />
 
@@ -913,6 +1092,10 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         onToggleFullScreen={() => setIsFullScreen((v) => !v)}
         onOpenTemplates={() => setTemplatesOpen(true)}
         onPublishTemplate={() => setPublishModalOpen(true)}
+        onShareWork={() => handleOpenShare(activeWork)}
+        collaboratorsPresence={collabPeers}
+        isSharedWork={Boolean(activeWork?.isShared)}
+        sharedRole={activeWork?.sharedRole || 'owner'}
         onBackToHub={() => onSelectWork?.(null)}
         onToggleCitations={() => setCitationsOpen((v) => !v)}
         citationsOpen={citationsOpen}
@@ -1778,6 +1961,33 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         }}
         droppedFile={droppedImportFile}
         onConfirmImport={handleConfirmImport}
+      />
+
+      {/* Modal de Compartición de Redacción (en vivo / copia) */}
+      <ShareWorkModal
+        open={shareWorkModalOpen}
+        work={shareWorkTarget}
+        user={
+          userProfile ||
+          (currentUser
+            ? {
+                id: currentUser.id,
+                email: '',
+                fullName: currentUser.name || '',
+                username: currentUser.username || null,
+              }
+            : null)
+        }
+        friendships={friendships}
+        onClose={() => {
+          setShareWorkModalOpen(false);
+          setShareWorkTarget(null);
+        }}
+        onOpenFriendsModal={() => {
+          setShareWorkModalOpen(false);
+          onOpenFriendsModal?.();
+        }}
+        onNotify={onNotify}
       />
 
       {/* Notificación Flotante de Progreso en Esquina Inferior Derecha */}

@@ -13,12 +13,14 @@ import {
   DocumentShareRecord,
   FolderRecord,
   FriendshipRecord,
+  WorkShareRecord,
 } from '../types/studyflow';
 
 interface NotificationsBellProps {
   currentUserId: string | null;
   friendships: FriendshipRecord[];
   incomingShares: DocumentShareRecord[];
+  incomingWorkShares?: WorkShareRecord[];
   folders: FolderRecord[];
   onAcceptFriend: (friendshipId: string) => Promise<void>;
   onRejectFriend: (friendshipId: string) => Promise<void>;
@@ -28,6 +30,9 @@ interface NotificationsBellProps {
   ) => Promise<void>;
   onAcceptCollaborativeShare: (share: DocumentShareRecord) => Promise<void>;
   onDismissShare: (shareId: string) => Promise<void>;
+  onAcceptWorkCopy?: (share: WorkShareRecord) => Promise<void>;
+  onAcceptCollaborativeWork?: (share: WorkShareRecord) => Promise<void>;
+  onDismissWorkShare?: (shareId: string) => Promise<void>;
   onOpenFriendsModal: () => void;
 }
 
@@ -35,12 +40,16 @@ export const NotificationsBell: React.FC<NotificationsBellProps> = ({
   currentUserId,
   friendships,
   incomingShares,
+  incomingWorkShares = [],
   folders,
   onAcceptFriend,
   onRejectFriend,
   onAcceptCopyShare,
   onAcceptCollaborativeShare,
   onDismissShare,
+  onAcceptWorkCopy,
+  onAcceptCollaborativeWork,
+  onDismissWorkShare,
   onOpenFriendsModal,
 }) => {
   const [open, setOpen] = useState(false);
@@ -77,9 +86,10 @@ export const NotificationsBell: React.FC<NotificationsBellProps> = ({
     (f) => f.status === 'pending' && f.addresseeId === currentUserId
   );
   const pendingShares = incomingShares.filter((s) => s.status === 'pending');
+  const pendingWorkShares = incomingWorkShares.filter((s) => s.status === 'pending');
 
   const hasAny =
-    pendingFriendRequests.length > 0 || pendingShares.length > 0;
+    pendingFriendRequests.length > 0 || pendingShares.length > 0 || pendingWorkShares.length > 0;
 
   const runAction = async (id: string, fn: () => Promise<void>) => {
     setBusyId(id);
@@ -302,6 +312,82 @@ export const NotificationsBell: React.FC<NotificationsBellProps> = ({
                           onClick={() =>
                             void runAction(share.id, () =>
                               onDismissShare(share.id)
+                            )
+                          }
+                          className="py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium disabled:opacity-50"
+                        >
+                          Descartar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {pendingWorkShares.map((wShare) => {
+                  const isBusy = busyId === wShare.id;
+                  const senderLabel = wShare.ownerProfile?.username
+                    ? `@${wShare.ownerProfile.username}`
+                    : wShare.ownerProfile?.fullName || 'Un compañero';
+
+                  return (
+                    <div key={wShare.id} className="p-3.5 space-y-2.5">
+                      <div className="flex items-start gap-2.5">
+                        <div className="w-7 h-7 rounded-lg bg-teal-500/15 border border-teal-500/30 flex items-center justify-center text-teal-300 flex-shrink-0">
+                          {wShare.shareMode === 'copy' ? (
+                            <Copy className="w-3.5 h-3.5" />
+                          ) : (
+                            <Users className="w-3.5 h-3.5" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-slate-200 leading-snug">
+                            <span className="font-semibold text-white">{senderLabel}</span>{' '}
+                            {wShare.shareMode === 'copy'
+                              ? 'te envió una copia de redacción:'
+                              : 'te invitó a redactar en equipo:'}
+                          </p>
+                          <p className="text-[11px] font-semibold text-teal-300 truncate flex items-center gap-1 mt-0.5">
+                            <FileText className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate">{wShare.workTitle || 'Redacción'}</span>
+                          </p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            {wShare.shareMode === 'copy'
+                              ? 'Copia independiente para tu taller de redacción'
+                              : wShare.role === 'collaborator'
+                                ? 'Permiso: Editor colaborativo (en vivo)'
+                                : 'Permiso: Solo lectura'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pl-9">
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() =>
+                            void runAction(wShare.id, () =>
+                              wShare.shareMode === 'copy'
+                                ? onAcceptWorkCopy?.(wShare) ?? Promise.resolve()
+                                : onAcceptCollaborativeWork?.(wShare) ?? Promise.resolve()
+                            )
+                          }
+                          className="flex-1 py-1.5 px-2.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-semibold flex items-center justify-center gap-1 disabled:opacity-50"
+                        >
+                          {isBusy ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Check className="w-3 h-3" />
+                          )}
+                          <span>
+                            {wShare.shareMode === 'copy' ? 'Guardar copia' : 'Unirse a redactar'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() =>
+                            void runAction(wShare.id, () =>
+                              onDismissWorkShare?.(wShare.id) ?? Promise.resolve()
                             )
                           }
                           className="py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium disabled:opacity-50"

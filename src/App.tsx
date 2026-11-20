@@ -27,6 +27,7 @@ import {
   TaskRecord,
   ToastItem,
   UserProfile,
+  WorkShareRecord,
 } from './types/studyflow';
 import {
   DEFAULT_STUDY_SETTINGS,
@@ -115,15 +116,22 @@ import { UsernameOnboardingModal } from './components/UsernameOnboardingModal';
 import { NotificationsBell } from './components/NotificationsBell';
 import { FriendsAndSharesModal } from './components/FriendsAndSharesModal';
 import { ShareDocumentModal } from './components/ShareDocumentModal';
+import { ShareWorkModal } from './components/writer/ShareWorkModal';
 import { FeedbackModal } from './components/FeedbackModal';
 import {
+  acceptCollaborativeWork,
   acceptDocumentCopy,
+  acceptWorkCopy,
   extractShareTokenFromSearch,
+  extractWorkShareTokenFromSearch,
   fetchFriendships,
   fetchIncomingShares,
+  fetchIncomingWorkShares,
   fetchNotesForDocument,
   fetchSharedDocumentsWithMe,
+  fetchSharedWorksWithMe,
   redeemShareLink,
+  redeemWorkShareLink,
   removeFriendship,
   resolveEmailForLogin,
   respondFriendRequest,
@@ -132,6 +140,7 @@ import {
   subscribeToSocialNotifications,
   updateMyUsername,
   updateShareStatusOrRole,
+  updateWorkShareStatusOrRole,
 } from './lib/collaboration';
 
 const DEFAULT_DIAGNOSTIC_DATA: DiagnosticData = {
@@ -173,6 +182,8 @@ interface WorkspaceShellProps {
   onOpenFeedbackModal?: () => void;
   onOpenFriendsModal: () => void;
   onShareDocument: (doc: DocumentRecord) => void;
+  onShareWork?: (work: StudyWorkDraft) => void;
+  friendships?: FriendshipRecord[];
   notificationsSlot?: React.ReactNode;
   onOpenAppearanceModal: () => void;
   onToggleAudio: () => Promise<void>;
@@ -264,6 +275,8 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   onOpenFeedbackModal,
   onOpenFriendsModal,
   onShareDocument,
+  onShareWork,
+  friendships = [],
   notificationsSlot,
   onOpenAppearanceModal,
   onToggleAudio,
@@ -424,6 +437,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 }}
                 onDeleteWork={onDeleteWork}
                 onRenameWork={onRenameWork}
+                onShareWork={onShareWork}
                 onCloseDrawer={() => onSetSidebarOpen(false)}
                 onOpenTemplates={() => {
                   onSelectWork(null);
@@ -532,6 +546,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 onCreateNewWork={onCreateNewWork}
                 onDeleteWork={onDeleteWork}
                 onRenameWork={onRenameWork}
+                onShareWork={onShareWork}
                 onExportWorkToReadings={onExportWorkToReadings}
                 onNotify={onNotify}
                 templatesOpen={writerTemplatesModalOpen}
@@ -550,6 +565,9 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                       }
                     : null
                 }
+                userProfile={user}
+                friendships={friendships}
+                onOpenFriendsModal={onOpenFriendsModal}
                 onOpenAccountModal={onOpenAccountModal}
               />
             </div>
@@ -838,11 +856,14 @@ export const App: React.FC = () => {
   const [sharedDocuments, setSharedDocuments] = useState<DocumentRecord[]>([]);
   const [friendships, setFriendships] = useState<FriendshipRecord[]>([]);
   const [incomingShares, setIncomingShares] = useState<DocumentShareRecord[]>([]);
+  const [incomingWorkShares, setIncomingWorkShares] = useState<WorkShareRecord[]>([]);
   const [collaboratorsPresence, setCollaboratorsPresence] = useState<
     CollaboratorPresence[]
   >([]);
   const [friendsModalOpen, setFriendsModalOpen] = useState<boolean>(false);
   const [shareDocTarget, setShareDocTarget] = useState<DocumentRecord | null>(null);
+  const [shareWorkTarget, setShareWorkTarget] = useState<StudyWorkDraft | null>(null);
+  const [shareWorkModalOpen, setShareWorkModalOpen] = useState<boolean>(false);
   const collabHandleRef = useRef<{
     updatePage: (page: number) => void;
     unsubscribe: () => void;
@@ -1011,16 +1032,33 @@ export const App: React.FC = () => {
 
   const refreshSocialData = useCallback(async (userId: string) => {
     try {
-      const [fr, sh, sDocs] = await Promise.all([
+      const [fr, sh, sDocs, wShares, sWorks] = await Promise.all([
         fetchFriendships(userId),
         fetchIncomingShares(userId),
         fetchSharedDocumentsWithMe(userId),
+        fetchIncomingWorkShares(userId),
+        fetchSharedWorksWithMe(userId),
       ]);
       setFriendships(fr);
       setIncomingShares(sh);
       setSharedDocuments(sDocs);
+      setIncomingWorkShares(wShares);
+
+      if (sWorks.length > 0) {
+        setWorks((prevWorks) => {
+          const map = new Map<string, StudyWorkDraft>();
+          for (const w of prevWorks) map.set(w.id, w);
+          for (const sw of sWorks) {
+            const existing = map.get(sw.id);
+            if (!existing || new Date(sw.updatedAt).getTime() >= new Date(existing.updatedAt).getTime()) {
+              map.set(sw.id, { ...existing, ...sw });
+            }
+          }
+          return Array.from(map.values());
+        });
+      }
     } catch {
-      // Silenciar si aún no se aplica la migración v2 en Supabase
+      // Silenciar si aún no se aplica la migración v2 o v7 en Supabase
     }
   }, []);
 
@@ -1159,6 +1197,14 @@ export const App: React.FC = () => {
         cleanUrl.searchParams.delete('share');
         window.history.replaceState({}, '', cleanUrl.toString());
       }
+
+      const workShareToken = extractWorkShareTokenFromSearch(window.location.search);
+      if (workShareToken) {
+        window.sessionStorage.setItem('sf_pending_work_share_token', workShareToken);
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('shareWork');
+        window.history.replaceState({}, '', cleanUrl.toString());
+      }
     }
 
     if (!isSupabaseConfigured || !supabase) return;
@@ -1192,7 +1238,8 @@ export const App: React.FC = () => {
         void hydrateFromCloud(profile);
       } else if (
         typeof window !== 'undefined' &&
-        window.sessionStorage.getItem('sf_pending_share_token')
+        (window.sessionStorage.getItem('sf_pending_share_token') ||
+          window.sessionStorage.getItem('sf_pending_work_share_token'))
       ) {
         setAuthWelcomeOpen(false);
         setAccountModalOpen(true);
@@ -1217,6 +1264,7 @@ export const App: React.FC = () => {
         setSharedDocuments([]);
         setFriendships([]);
         setIncomingShares([]);
+        setIncomingWorkShares([]);
         setCollaboratorsPresence([]);
         setSyncStatus('local');
       }
@@ -2258,6 +2306,124 @@ export const App: React.FC = () => {
     notify('Elemento compartido descartado', 'info');
   };
 
+  const handleAcceptWorkCopy = async (share: WorkShareRecord) => {
+    if (!user) return;
+    let rawContentHtml = '<p></p>';
+    let rawContentText = '';
+    let rawTargetWords: number | null = null;
+    let rawTags: string[] = [];
+    let rawPaperSize: 'letter' | 'legal' | 'a4' = share.paperSize || 'letter';
+
+    if (supabase) {
+      try {
+        const { data } = await supabase
+          .from('study_works')
+          .select('*')
+          .eq('id', share.workId)
+          .maybeSingle();
+        if (data) {
+          rawContentHtml = data.content_html || '<p></p>';
+          rawContentText = data.content_text || '';
+          rawTargetWords = data.target_word_count ?? null;
+          rawTags = data.tags || [];
+          rawPaperSize = data.paper_size || share.paperSize || 'letter';
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    const cloned = await acceptWorkCopy({
+      shareId: share.id,
+      sourceWorkId: share.workId,
+      workTitle: share.workTitle || 'Redacción',
+      contentHtml: rawContentHtml,
+      contentText: rawContentText,
+      wordCount: share.wordCount || 0,
+      targetWordCount: rawTargetWords,
+      tags: rawTags,
+      paperSize: rawPaperSize,
+      recipientId: user.id,
+    });
+
+    setWorks((prev) => [cloned, ...prev]);
+    setActiveWorkId(cloned.id);
+    setCurrentModule('writer');
+    await refreshSocialData(user.id);
+    notify(
+      `Copia de "${share.workTitle || 'Redacción'}" agregada a tus redacciones`,
+      'success'
+    );
+  };
+
+  const handleAcceptCollaborativeWork = async (share: WorkShareRecord) => {
+    if (!user) return;
+    let rawContentHtml = '<p></p>';
+    let rawContentText = '';
+    let rawTargetWords: number | null = null;
+    let rawTags: string[] = [];
+    let rawPaperSize: 'letter' | 'legal' | 'a4' = share.paperSize || 'letter';
+
+    if (supabase) {
+      try {
+        const { data } = await supabase
+          .from('study_works')
+          .select('*')
+          .eq('id', share.workId)
+          .maybeSingle();
+        if (data) {
+          rawContentHtml = data.content_html || '<p></p>';
+          rawContentText = data.content_text || '';
+          rawTargetWords = data.target_word_count ?? null;
+          rawTags = data.tags || [];
+          rawPaperSize = data.paper_size || share.paperSize || 'letter';
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    const sharedDraft = await acceptCollaborativeWork({
+      shareId: share.id,
+      workId: share.workId,
+      workTitle: share.workTitle || 'Redacción',
+      contentHtml: rawContentHtml,
+      contentText: rawContentText,
+      wordCount: share.wordCount || 0,
+      paperSize: rawPaperSize,
+      targetWordCount: rawTargetWords,
+      tags: rawTags,
+      ownerId: share.ownerId,
+      ownerUsername:
+        share.ownerProfile?.username || share.ownerProfile?.fullName || null,
+      role: share.role,
+    });
+
+    setWorks((prev) => {
+      const filtered = prev.filter((w) => w.id !== sharedDraft.id);
+      return [sharedDraft, ...filtered];
+    });
+    setActiveWorkId(sharedDraft.id);
+    setCurrentModule('writer');
+    await refreshSocialData(user.id);
+    notify(
+      `Te uniste a la redacción colaborativa de "${share.workTitle || 'Redacción'}"`,
+      'success'
+    );
+  };
+
+  const handleDismissWorkShare = async (shareId: string) => {
+    if (!user) return;
+    await updateWorkShareStatusOrRole(shareId, { status: 'revoked' });
+    setIncomingWorkShares((prev) => prev.filter((s) => s.id !== shareId));
+    notify('Invitación de redacción descartada', 'info');
+  };
+
+  const handleOpenSharedWork = (workId: string) => {
+    setActiveWorkId(workId);
+    setCurrentModule('writer');
+  };
+
   const handleExportBackup = () => {
     const payload = {
       version: 2,
@@ -2732,39 +2898,90 @@ export const App: React.FC = () => {
     [documents, sharedDocuments, activeDocId]
   );
 
-  // Canje automático de enlace compartido (?share=TOKEN) tras iniciar sesión
+  // Canje automático de enlace compartido (?share=TOKEN o ?shareWork=TOKEN) tras iniciar sesión
   useEffect(() => {
     if (!user?.id || !profileLoadedFromCloud || !isSupabaseConfigured) return;
     if (typeof window === 'undefined') return;
-    const pendingToken = window.sessionStorage.getItem('sf_pending_share_token');
-    if (!pendingToken) return;
 
-    window.sessionStorage.removeItem('sf_pending_share_token');
-    void (async () => {
-      try {
-        const result = await redeemShareLink(pendingToken);
-        await refreshSocialData(user.id);
-        if (result.shareMode === 'collaborative') {
+    // 1. Enlace de documento de lectura
+    const pendingToken = window.sessionStorage.getItem('sf_pending_share_token');
+    if (pendingToken) {
+      window.sessionStorage.removeItem('sf_pending_share_token');
+      void (async () => {
+        try {
+          const result = await redeemShareLink(pendingToken);
+          await refreshSocialData(user.id);
+          if (result.shareMode === 'collaborative') {
+            notify(
+              `Te uniste a la sesión colaborativa de "${result.docName}"`,
+              'success'
+            );
+            await handleOpenDocument(result.docId, 1);
+            setCurrentModule('docs');
+          } else {
+            notify(
+              `Copia de "${result.docName}" lista para guardar en tu biblioteca.`,
+              'info'
+            );
+            setFriendsModalOpen(true);
+          }
+        } catch (err) {
           notify(
-            `Te uniste a la sesión colaborativa de "${result.docName}"`,
-            'success'
+            formatErrorMessageEs(err, 'No se pudo abrir el enlace compartido'),
+            'warning'
           );
-          await handleOpenDocument(result.docId, 1);
-          setCurrentModule('docs');
-        } else {
-          notify(
-            `Copia de "${result.docName}" lista para guardar en tu biblioteca.`,
-            'info'
-          );
-          setFriendsModalOpen(true);
         }
-      } catch (err) {
-        notify(
-          formatErrorMessageEs(err, 'No se pudo abrir el enlace compartido'),
-          'warning'
-        );
-      }
-    })();
+      })();
+    }
+
+    // 2. Enlace de redacción / trabajo
+    const pendingWorkToken = window.sessionStorage.getItem('sf_pending_work_share_token');
+    if (pendingWorkToken) {
+      window.sessionStorage.removeItem('sf_pending_work_share_token');
+      void (async () => {
+        try {
+          const result = await redeemWorkShareLink(pendingWorkToken);
+          await refreshSocialData(user.id);
+          if (result.shareMode === 'collaborative') {
+            const sharedDraft = await acceptCollaborativeWork({
+              shareId: result.shareId,
+              workId: result.workId,
+              workTitle: result.workTitle,
+              contentHtml: result.contentHtml,
+              contentText: result.contentText,
+              wordCount: result.wordCount,
+              paperSize: result.paperSize,
+              targetWordCount: result.targetWordCount,
+              tags: result.tags,
+              ownerId: result.ownerId,
+              ownerUsername: result.ownerUsername,
+              role: result.role,
+            });
+            setWorks((prev) => {
+              const filtered = prev.filter((w) => w.id !== sharedDraft.id);
+              return [sharedDraft, ...filtered];
+            });
+            setActiveWorkId(sharedDraft.id);
+            setCurrentModule('writer');
+            notify(
+              `Te uniste a la redacción colaborativa de "${result.workTitle}"`,
+              'success'
+            );
+          } else {
+            notify(
+              `Copia de redacción "${result.workTitle}" lista para agregar a tus trabajos`,
+              'info'
+            );
+            setFriendsModalOpen(true);
+          }
+        } catch (err) {
+          notify(
+            formatErrorMessageEs(err, 'No se pudo abrir el enlace de redacción compartido'),
+            'warning'
+          );
+        }
+      })();
+    }
   }, [user?.id, profileLoadedFromCloud, refreshSocialData, handleOpenDocument, notify]);
 
   // Suscripción Realtime de notas y presencia para el documento activo
@@ -2852,17 +3069,26 @@ export const App: React.FC = () => {
         onOpenFeedbackModal={() => setFeedbackModalOpen(true)}
         onOpenFriendsModal={() => setFriendsModalOpen(true)}
         onShareDocument={(doc) => setShareDocTarget(doc)}
+        onShareWork={(work) => {
+          setShareWorkTarget(work);
+          setShareWorkModalOpen(true);
+        }}
+        friendships={friendships}
         notificationsSlot={
           <NotificationsBell
             currentUserId={user?.id || null}
             friendships={friendships}
             incomingShares={incomingShares}
+            incomingWorkShares={incomingWorkShares}
             folders={folders}
             onAcceptFriend={handleAcceptFriend}
             onRejectFriend={handleRejectOrRemoveFriend}
             onAcceptCopyShare={handleAcceptCopyShare}
             onAcceptCollaborativeShare={handleAcceptCollaborativeShare}
             onDismissShare={handleDismissOrLeaveShare}
+            onAcceptWorkCopy={handleAcceptWorkCopy}
+            onAcceptCollaborativeWork={handleAcceptCollaborativeWork}
+            onDismissWorkShare={handleDismissWorkShare}
             onOpenFriendsModal={() => setFriendsModalOpen(true)}
           />
         }
@@ -2969,6 +3195,7 @@ export const App: React.FC = () => {
         user={user}
         friendships={friendships}
         incomingShares={incomingShares}
+        incomingWorkShares={incomingWorkShares}
         folders={folders}
         onClose={() => setFriendsModalOpen(false)}
         onSendFriendRequest={handleSendFriendRequest}
@@ -2978,6 +3205,10 @@ export const App: React.FC = () => {
         onAcceptCollaborativeShare={handleAcceptCollaborativeShare}
         onOpenSharedDocument={(docId) => void handleOpenDocument(docId)}
         onDismissOrLeaveShare={handleDismissOrLeaveShare}
+        onAcceptWorkCopy={handleAcceptWorkCopy}
+        onAcceptCollaborativeWork={handleAcceptCollaborativeWork}
+        onOpenSharedWork={handleOpenSharedWork}
+        onDismissOrLeaveWorkShare={handleDismissWorkShare}
       />
 
       <ShareDocumentModal
@@ -2986,6 +3217,19 @@ export const App: React.FC = () => {
         user={user}
         friendships={friendships}
         onClose={() => setShareDocTarget(null)}
+        onOpenFriendsModal={() => setFriendsModalOpen(true)}
+        onNotify={notify}
+      />
+
+      <ShareWorkModal
+        open={shareWorkModalOpen}
+        work={shareWorkTarget}
+        user={user}
+        friendships={friendships}
+        onClose={() => {
+          setShareWorkModalOpen(false);
+          setShareWorkTarget(null);
+        }}
         onOpenFriendsModal={() => setFriendsModalOpen(true)}
         onNotify={notify}
       />

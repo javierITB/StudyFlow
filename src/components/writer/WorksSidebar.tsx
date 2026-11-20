@@ -8,11 +8,13 @@ import {
   Pencil,
   PenTool,
   Search,
+  Share2,
   Sliders,
   Sparkles,
   Target,
   Trash2,
   UploadCloud,
+  Users,
   X,
 } from 'lucide-react';
 import { StudyWorkDraft, UserProfile } from '../../types/studyflow';
@@ -24,6 +26,7 @@ interface WorksSidebarProps {
   onCreateNewWork: () => void;
   onDeleteWork: (id: string) => void;
   onRenameWork?: (id: string, newTitle: string) => void;
+  onShareWork?: (work: StudyWorkDraft) => void;
   onCloseDrawer?: () => void;
   onOpenTemplates: () => void;
   onOpenImportModal?: () => void;
@@ -40,6 +43,7 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
   onCreateNewWork,
   onDeleteWork,
   onRenameWork,
+  onShareWork,
   onCloseDrawer,
   onOpenTemplates,
   onOpenImportModal,
@@ -274,6 +278,19 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 flex-shrink-0">
+                        {onShareWork && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onShareWork(work);
+                            }}
+                            className="p-1 rounded text-slate-400 hover:text-teal-300 hover:bg-slate-800"
+                            title="Compartir redacción (en vivo o copia)"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => handleStartRename(e, work)}
@@ -317,6 +334,15 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
                     {work.paperSize && (
                       <span className="px-1.5 py-0.2 rounded bg-indigo-500/15 border border-indigo-500/25 text-[9px] font-mono text-indigo-300 uppercase shrink-0">
                         {work.paperSize === 'legal' ? 'Oficio' : work.paperSize === 'a4' ? 'A4' : 'Carta'}
+                      </span>
+                    )}
+                    {work.isShared && (
+                      <span
+                        className="px-1.5 py-0.2 rounded bg-teal-500/15 border border-teal-500/30 text-[9px] font-medium text-teal-300 flex items-center gap-0.5 shrink-0"
+                        title={work.ownerUsername ? `Compartido por @${work.ownerUsername}` : 'Redacción colaborativa'}
+                      >
+                        <Users className="w-2.5 h-2.5 text-teal-400" />
+                        <span>Colab{work.ownerUsername ? ` @${work.ownerUsername}` : ''}</span>
                       </span>
                     )}
                   </div>

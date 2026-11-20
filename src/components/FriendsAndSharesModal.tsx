@@ -18,6 +18,7 @@ import {
   FriendshipRecord,
   PublicProfile,
   UserProfile,
+  WorkShareRecord,
 } from '../types/studyflow';
 import { searchUsersByUsername } from '../lib/collaboration';
 import { formatErrorMessageEs } from '../lib/errorMessages';
@@ -27,6 +28,7 @@ interface FriendsAndSharesModalProps {
   user: UserProfile | null;
   friendships: FriendshipRecord[];
   incomingShares: DocumentShareRecord[];
+  incomingWorkShares?: WorkShareRecord[];
   folders: FolderRecord[];
   onClose: () => void;
   onSendFriendRequest: (addresseeId: string) => Promise<void>;
@@ -39,6 +41,10 @@ interface FriendsAndSharesModalProps {
   onAcceptCollaborativeShare: (share: DocumentShareRecord) => Promise<void>;
   onOpenSharedDocument: (docId: string) => void;
   onDismissOrLeaveShare: (shareId: string) => Promise<void>;
+  onAcceptWorkCopy?: (share: WorkShareRecord) => Promise<void>;
+  onAcceptCollaborativeWork?: (share: WorkShareRecord) => Promise<void>;
+  onOpenSharedWork?: (workId: string) => void;
+  onDismissOrLeaveWorkShare?: (shareId: string) => Promise<void>;
 }
 
 export const FriendsAndSharesModal: React.FC<FriendsAndSharesModalProps> = ({
@@ -46,6 +52,7 @@ export const FriendsAndSharesModal: React.FC<FriendsAndSharesModalProps> = ({
   user,
   friendships,
   incomingShares,
+  incomingWorkShares = [],
   folders,
   onClose,
   onSendFriendRequest,
@@ -55,6 +62,10 @@ export const FriendsAndSharesModal: React.FC<FriendsAndSharesModalProps> = ({
   onAcceptCollaborativeShare,
   onOpenSharedDocument,
   onDismissOrLeaveShare,
+  onAcceptWorkCopy,
+  onAcceptCollaborativeWork,
+  onOpenSharedWork,
+  onDismissOrLeaveWorkShare,
 }) => {
   const [activeTab, setActiveTab] = useState<'friends' | 'requests' | 'shares'>(
     'friends'
@@ -109,6 +120,17 @@ export const FriendsAndSharesModal: React.FC<FriendsAndSharesModalProps> = ({
   const activeCollabShares = incomingShares.filter(
     (s) => s.status === 'accepted' && s.shareMode === 'collaborative'
   );
+
+  const pendingWorkShares = incomingWorkShares.filter((s) => s.status === 'pending');
+  const activeCollabWorkShares = incomingWorkShares.filter(
+    (s) => s.status === 'accepted' && s.shareMode === 'collaborative'
+  );
+
+  const totalSharesCount =
+    pendingShares.length +
+    activeCollabShares.length +
+    pendingWorkShares.length +
+    activeCollabWorkShares.length;
 
   const getRelationshipWith = (peerId: string): FriendshipRecord | undefined =>
     friendships.find(
@@ -186,7 +208,7 @@ export const FriendsAndSharesModal: React.FC<FriendsAndSharesModalProps> = ({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            Compartidos ({pendingShares.length + activeCollabShares.length})
+            Compartidos ({totalSharesCount})
           </button>
         </div>
 
@@ -448,6 +470,83 @@ export const FriendsAndSharesModal: React.FC<FriendsAndSharesModalProps> = ({
 
           {activeTab === 'shares' && (
             <div className="space-y-4">
+              {/* Redacciones recibidas pendientes */}
+              {pendingWorkShares.length > 0 && (
+                <div className="space-y-2">
+                  <div className="font-semibold text-teal-300">
+                    Redacciones recibidas pendientes ({pendingWorkShares.length})
+                  </div>
+                  <div className="space-y-2">
+                    {pendingWorkShares.map((wShare) => (
+                      <div
+                        key={wShare.id}
+                        className="p-3 rounded-xl bg-slate-950 border border-teal-500/30 space-y-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-white flex items-center gap-1.5">
+                              {wShare.shareMode === 'copy' ? (
+                                <Copy className="w-3.5 h-3.5 text-teal-400" />
+                              ) : (
+                                <Users className="w-3.5 h-3.5 text-teal-400" />
+                              )}
+                              <span className="truncate">{wShare.workTitle || 'Redacción'}</span>
+                            </p>
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              De @{wShare.ownerProfile?.username || 'compañero'} ·{' '}
+                              {wShare.shareMode === 'copy'
+                                ? 'Copia independiente para tu taller de redacción'
+                                : wShare.role === 'collaborator'
+                                  ? 'Redacción colaborativa en vivo (Editor)'
+                                  : 'Redacción colaborativa en vivo (Lector)'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={busyId === wShare.id}
+                            onClick={() =>
+                              void runAction(wShare.id, () =>
+                                wShare.shareMode === 'copy'
+                                  ? onAcceptWorkCopy?.(wShare) ?? Promise.resolve()
+                                  : onAcceptCollaborativeWork?.(wShare) ?? Promise.resolve()
+                              )
+                            }
+                            className="flex-1 py-1.5 px-3 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-semibold flex items-center justify-center gap-1.5"
+                          >
+                            {busyId === wShare.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Check className="w-3.5 h-3.5" />
+                            )}
+                            <span>
+                              {wShare.shareMode === 'copy'
+                                ? 'Guardar copia'
+                                : 'Unirse y redactar'}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyId === wShare.id}
+                            onClick={() =>
+                              void runAction(wShare.id, () =>
+                                onDismissOrLeaveWorkShare?.(wShare.id) ?? Promise.resolve()
+                              )
+                            }
+                            className="py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+                          >
+                            Descartar
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Documentos de lectura recibidos pendientes */}
               {pendingShares.length > 0 && (
                 <div className="space-y-2">
                   <div className="font-semibold text-emerald-300">
@@ -597,6 +696,66 @@ export const FriendsAndSharesModal: React.FC<FriendsAndSharesModalProps> = ({
                             }
                             className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300"
                             title="Salir de esta sesión colaborativa"
+                          >
+                            Salir
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Redacciones colaborativas activas */}
+              <div className="space-y-2">
+                <div className="font-semibold text-slate-300">
+                  Redacciones colaborativas en vivo ({activeCollabWorkShares.length})
+                </div>
+                {activeCollabWorkShares.length === 0 ? (
+                  <p className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 text-slate-500 text-center">
+                    No tienes redacciones colaborativas activas en este momento.
+                  </p>
+                ) : (
+                  <div className="rounded-xl bg-slate-950 border border-slate-800 divide-y divide-slate-800/70">
+                    {activeCollabWorkShares.map((wShare) => (
+                      <div
+                        key={wShare.id}
+                        className="p-3 flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-semibold text-white truncate flex items-center gap-1.5">
+                            <FileText className="w-3.5 h-3.5 text-teal-400 flex-shrink-0" />
+                            <span className="truncate">{wShare.workTitle || 'Redacción'}</span>
+                          </p>
+                          <p className="text-[11px] text-slate-400">
+                            De @{wShare.ownerProfile?.username || 'autor'} ·{' '}
+                            {wShare.role === 'collaborator'
+                              ? 'Editor colaborativo'
+                              : 'Solo lectura'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onOpenSharedWork?.(wShare.workId);
+                              onClose();
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-semibold flex items-center gap-1"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5" />
+                            <span>Abrir</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyId === wShare.id}
+                            onClick={() =>
+                              void runAction(wShare.id, () =>
+                                onDismissOrLeaveWorkShare?.(wShare.id) ?? Promise.resolve()
+                              )
+                            }
+                            className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300"
+                            title="Salir de esta redacción colaborativa"
                           >
                             Salir
                           </button>
