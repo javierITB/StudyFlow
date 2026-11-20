@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
+  Check,
   Clock,
   FilePlus2,
   FileText,
@@ -9,6 +10,7 @@ import {
   GraduationCap,
   Lightbulb,
   Loader2,
+  Pencil,
   Plus,
   Scale,
   Sparkles,
@@ -16,6 +18,7 @@ import {
   Trash2,
   Upload,
   User,
+  X,
 } from 'lucide-react';
 import { CommunityTemplateRecord, StudyWorkDraft } from '../../types/studyflow';
 import { fetchTopCommunityTemplates, rateCommunityTemplate } from '../../lib/communityTemplates';
@@ -91,6 +94,7 @@ export interface TemplatesWelcomeHubProps {
   onSelectCommunityTemplate?: (tmpl: CommunityTemplateRecord) => void;
   onOpenWork: (id: string) => void;
   onDeleteWork?: (id: string) => void;
+  onRenameWork?: (id: string, newTitle: string) => void;
   isCreating?: boolean;
   creatingTemplateId?: string | null;
   currentUserId?: string | null;
@@ -105,6 +109,7 @@ export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
   onSelectCommunityTemplate,
   onOpenWork,
   onDeleteWork,
+  onRenameWork,
   isCreating = false,
   creatingTemplateId = null,
   currentUserId,
@@ -112,6 +117,31 @@ export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
   onNotify,
   onOpenImportModal,
 }) => {
+  const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+
+  // Orden consistente: documentos editados más recientemente primero
+  const sortedWorks = useMemo(() => {
+    return [...works].sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+  }, [works]);
+
+  const handleStartRename = (e: React.MouseEvent, work: StudyWorkDraft) => {
+    e.stopPropagation();
+    setEditingWorkId(work.id);
+    setEditingTitle(work.title || 'Trabajo sin título');
+  };
+
+  const handleSaveRename = (workId: string) => {
+    const trimmed = editingTitle.trim() || 'Trabajo sin título';
+    onRenameWork?.(workId, trimmed);
+    setEditingWorkId(null);
+  };
+
+  const handleCancelRename = () => {
+    setEditingWorkId(null);
+  };
   const [topCommunityTemplates, setTopCommunityTemplates] = useState<CommunityTemplateRecord[]>([]);
   const [isLoadingCommunity, setIsLoadingCommunity] = useState(false);
   const [communityCatalogOpen, setCommunityCatalogOpen] = useState(false);
@@ -305,11 +335,13 @@ export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {works.map((work) => {
+              {sortedWorks.map((work) => {
                 const targetPct =
                   work.targetWordCount && work.targetWordCount > 0
                     ? Math.min(100, Math.round((work.wordCount / work.targetWordCount) * 100))
                     : null;
+
+                const isEditing = editingWorkId === work.id;
 
                 return (
                   <div
@@ -318,33 +350,94 @@ export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
                   >
                     <div className="space-y-2">
                       <div className="flex items-start justify-between gap-2">
-                        <div
-                          onClick={() => onOpenWork(work.id)}
-                          className="min-w-0 flex-1 cursor-pointer"
-                        >
-                          <h3 className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors truncate">
-                            {work.title}
-                          </h3>
-                          <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-1">
-                            <Clock className="w-3 h-3 text-slate-500" />
-                            <span>
-                              Editado {new Date(work.updatedAt).toLocaleDateString('es-ES')}
-                            </span>
-                          </p>
-                        </div>
-
-                        {onDeleteWork && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteWork(work.id);
-                            }}
-                            className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Eliminar borrador"
+                        {isEditing ? (
+                          <div
+                            className="flex items-center gap-1.5 flex-1 min-w-0"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                            <input
+                              type="text"
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSaveRename(work.id);
+                                } else if (e.key === 'Escape') {
+                                  handleCancelRename();
+                                }
+                              }}
+                              autoFocus
+                              placeholder="Nombre del documento..."
+                              className="flex-1 bg-slate-950 border border-indigo-400 rounded-lg px-2.5 py-1 text-sm text-white font-bold outline-none focus:ring-1 focus:ring-indigo-400"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveRename(work.id)}
+                              className="p-1 rounded text-emerald-400 hover:bg-emerald-500/20"
+                              title="Guardar nombre"
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleCancelRename}
+                              className="p-1 rounded text-slate-400 hover:bg-slate-800"
+                              title="Cancelar"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div
+                              onClick={() => onOpenWork(work.id)}
+                              onDoubleClick={(e) => handleStartRename(e, work)}
+                              className="min-w-0 flex-1 cursor-pointer"
+                              title="Doble clic para renombrar"
+                            >
+                              <h3 className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors truncate">
+                                {work.title || 'Trabajo sin título'}
+                              </h3>
+                              <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-1">
+                                <Clock className="w-3 h-3 text-slate-500" />
+                                <span>
+                                  Editado {new Date(work.updatedAt).toLocaleDateString('es-ES')}
+                                </span>
+                                {work.paperSize && (
+                                  <span className="px-1.5 py-0.2 rounded bg-indigo-500/15 border border-indigo-500/25 text-[9px] font-mono text-indigo-300 uppercase">
+                                    {work.paperSize === 'legal' ? 'Oficio' : work.paperSize === 'a4' ? 'A4' : 'Carta'}
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {onRenameWork && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleStartRename(e, work)}
+                                  className="p-1 rounded-lg text-slate-400 hover:text-indigo-300 hover:bg-slate-800"
+                                  title="Renombrar trabajo"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {onDeleteWork && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeleteWork(work.id);
+                                  }}
+                                  className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10"
+                                  title="Eliminar borrador"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </>
                         )}
                       </div>
 

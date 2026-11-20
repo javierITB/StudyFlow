@@ -228,6 +228,7 @@ interface WorkspaceShellProps {
   onSaveWork: (work: StudyWorkDraft) => Promise<void>;
   onCreateNewWork: (template?: AcademicTemplate | null) => Promise<StudyWorkDraft>;
   onDeleteWork: (id: string) => Promise<void>;
+  onRenameWork?: (id: string, newTitle: string) => Promise<void>;
   onExportWorkToReadings: (work: StudyWorkDraft, folderId: string | null) => Promise<void>;
   activeWorkId: string | null;
   onSelectWork: (id: string | null) => void;
@@ -303,6 +304,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   onSaveWork,
   onCreateNewWork,
   onDeleteWork,
+  onRenameWork,
   onExportWorkToReadings,
   activeWorkId,
   onSelectWork,
@@ -418,9 +420,10 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                   }
                 }}
                 onCreateNewWork={() => {
-                  onSelectWork(null);
+                  void onCreateNewWork();
                 }}
                 onDeleteWork={onDeleteWork}
+                onRenameWork={onRenameWork}
                 onCloseDrawer={() => onSetSidebarOpen(false)}
                 onOpenTemplates={() => {
                   onSelectWork(null);
@@ -528,6 +531,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 onSaveWork={onSaveWork}
                 onCreateNewWork={onCreateNewWork}
                 onDeleteWork={onDeleteWork}
+                onRenameWork={onRenameWork}
                 onExportWorkToReadings={onExportWorkToReadings}
                 onNotify={onNotify}
                 templatesOpen={writerTemplatesModalOpen}
@@ -942,6 +946,9 @@ export const App: React.FC = () => {
       if (snap.works && snap.works.length > 0) {
         const cleaned = snap.works.filter(
           (w) => !(w.title === 'Mi Primer Trabajo de Investigación' && w.wordCount === 75)
+        );
+        cleaned.sort(
+          (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
         );
         setWorks(cleaned);
         const dummy = snap.works.find(
@@ -2024,6 +2031,37 @@ export const App: React.FC = () => {
     [notify]
   );
 
+  const handleRenameWork = useCallback(
+    async (id: string, newTitle: string) => {
+      const cleanTitle = newTitle.trim() || 'Trabajo sin título';
+      let targetWork: StudyWorkDraft | null = null;
+      setWorks((prev) =>
+        prev.map((w) => {
+          if (w.id === id) {
+            targetWork = {
+              ...w,
+              title: cleanTitle,
+              updatedAt: new Date().toISOString(),
+            };
+            return targetWork;
+          }
+          return w;
+        })
+      );
+
+      if (targetWork) {
+        void dbPut('works', targetWork).catch(() => {});
+        if (userRef.current && isSupabaseConfigured) {
+          void cloudUpsertWork(userRef.current.id, targetWork).catch((err) => {
+            console.warn('[StudyFlow] Error sincronizando borrador renombrado:', err);
+          });
+        }
+        notify(`Trabajo renombrado a "${cleanTitle}"`, 'success');
+      }
+    },
+    [notify]
+  );
+
   const handleExportWorkToReadings = useCallback(
     async (work: StudyWorkDraft, targetFolderId: string | null) => {
       try {
@@ -2869,6 +2907,7 @@ export const App: React.FC = () => {
         onSaveWork={handleSaveWork}
         onCreateNewWork={handleCreateNewWork}
         onDeleteWork={handleDeleteWork}
+        onRenameWork={handleRenameWork}
         onExportWorkToReadings={handleExportWorkToReadings}
         activeWorkId={activeWorkId}
         onSelectWork={setActiveWorkId}

@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  Check,
   ChevronLeft,
   FilePlus,
   FileText,
   FolderPlus,
+  Pencil,
   PenTool,
   Search,
   Sliders,
@@ -11,6 +13,7 @@ import {
   Target,
   Trash2,
   UploadCloud,
+  X,
 } from 'lucide-react';
 import { StudyWorkDraft, UserProfile } from '../../types/studyflow';
 
@@ -20,6 +23,7 @@ interface WorksSidebarProps {
   onSelectWork: (id: string | null) => void;
   onCreateNewWork: () => void;
   onDeleteWork: (id: string) => void;
+  onRenameWork?: (id: string, newTitle: string) => void;
   onCloseDrawer?: () => void;
   onOpenTemplates: () => void;
   onOpenImportModal?: () => void;
@@ -35,6 +39,7 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
   onSelectWork,
   onCreateNewWork,
   onDeleteWork,
+  onRenameWork,
   onCloseDrawer,
   onOpenTemplates,
   onOpenImportModal,
@@ -44,10 +49,35 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
   syncStatusLabel = 'Nube activa',
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
 
-  const filteredWorks = works.filter((w) =>
-    w.title.toLowerCase().includes(searchQuery.toLowerCase())
+  // Orden consistente y estable: los trabajos más recientes arriba
+  const sortedWorks = useMemo(() => {
+    return [...works].sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+  }, [works]);
+
+  const filteredWorks = sortedWorks.filter((w) =>
+    (w.title || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleStartRename = (e: React.MouseEvent, work: StudyWorkDraft) => {
+    e.stopPropagation();
+    setEditingWorkId(work.id);
+    setEditingTitle(work.title || 'Trabajo sin título');
+  };
+
+  const handleSaveRename = (workId: string) => {
+    const trimmed = editingTitle.trim() || 'Trabajo sin título';
+    onRenameWork?.(workId, trimmed);
+    setEditingWorkId(null);
+  };
+
+  const handleCancelRename = () => {
+    setEditingWorkId(null);
+  };
 
   return (
     <aside className="w-full h-full sf-sidebar-chrome backdrop-blur-md flex flex-col overflow-hidden border-r border-indigo-500/20">
@@ -178,51 +208,118 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
                 }`}
               >
                 <div className="flex items-start justify-between gap-1.5">
-                  <div className="flex items-center gap-2 min-w-0">
+                  {editingWorkId === work.id ? (
                     <div
-                      className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${
-                        isActive
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
-                      }`}
+                      className="flex items-center gap-1.5 flex-1 min-w-0"
+                      onClick={(e) => e.stopPropagation()}
                     >
-                      <FileText className="w-3.5 h-3.5" />
+                      <input
+                        type="text"
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSaveRename(work.id);
+                          } else if (e.key === 'Escape') {
+                            handleCancelRename();
+                          }
+                        }}
+                        autoFocus
+                        placeholder="Nombre del documento..."
+                        className="flex-1 bg-slate-950 border border-indigo-400 rounded-lg px-2 py-0.5 text-xs text-white outline-none focus:ring-1 focus:ring-indigo-400 font-semibold"
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSaveRename(work.id);
+                        }}
+                        className="p-1 rounded text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                        title="Guardar nombre"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCancelRename();
+                        }}
+                        className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                        title="Cancelar"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                    <span className="text-xs font-semibold text-white truncate group-hover:text-indigo-300 transition-colors">
-                      {work.title || 'Trabajo sin título'}
-                    </span>
-                  </div>
+                  ) : (
+                    <>
+                      <div
+                        className="flex items-center gap-2 min-w-0 flex-1"
+                        onDoubleClick={(e) => handleStartRename(e, work)}
+                        title="Doble clic para renombrar"
+                      >
+                        <div
+                          className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${
+                            isActive
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
+                          }`}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="text-xs font-semibold text-white truncate group-hover:text-indigo-300 transition-colors">
+                          {work.title || 'Trabajo sin título'}
+                        </span>
+                      </div>
 
-                  <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onExportToReadings(work);
-                      }}
-                      className="p-1 rounded text-slate-400 hover:text-purple-300 hover:bg-slate-800"
-                      title="Agregar a biblioteca de Lecturas"
-                    >
-                      <FolderPlus className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteWork(work.id);
-                      }}
-                      className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800"
-                      title="Eliminar trabajo"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                      <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleStartRename(e, work)}
+                          className="p-1 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800"
+                          title="Renombrar trabajo"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onExportToReadings(work);
+                          }}
+                          className="p-1 rounded text-slate-400 hover:text-purple-300 hover:bg-slate-800"
+                          title="Agregar a biblioteca de Lecturas"
+                        >
+                          <FolderPlus className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteWork(work.id);
+                          }}
+                          className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800"
+                          title="Eliminar trabajo"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between text-[10px] text-slate-400">
-                  <span className="font-mono">
-                    {work.wordCount} {work.wordCount === 1 ? 'palabra' : 'palabras'}
-                  </span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-mono truncate">
+                      {work.wordCount} {work.wordCount === 1 ? 'palabra' : 'palabras'}
+                    </span>
+                    {work.paperSize && (
+                      <span className="px-1.5 py-0.2 rounded bg-indigo-500/15 border border-indigo-500/25 text-[9px] font-mono text-indigo-300 uppercase shrink-0">
+                        {work.paperSize === 'legal' ? 'Oficio' : work.paperSize === 'a4' ? 'A4' : 'Carta'}
+                      </span>
+                    )}
+                  </div>
                   <span>{new Date(work.updatedAt).toLocaleDateString('es-ES')}</span>
                 </div>
 

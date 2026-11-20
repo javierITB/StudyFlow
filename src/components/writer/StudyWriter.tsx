@@ -49,6 +49,7 @@ interface StudyWriterProps {
   onSaveWork: (work: StudyWorkDraft) => Promise<void>;
   onCreateNewWork?: (template?: AcademicTemplate | null) => Promise<StudyWorkDraft>;
   onDeleteWork?: (id: string) => Promise<void>;
+  onRenameWork?: (id: string, newTitle: string) => Promise<void> | void;
   onExportWorkToReadings: (work: StudyWorkDraft, targetFolderId: string | null) => Promise<void>;
   onNotify: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
   templatesOpen?: boolean;
@@ -72,6 +73,7 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   onSaveWork,
   onCreateNewWork,
   onDeleteWork,
+  onRenameWork,
   onExportWorkToReadings,
   onNotify,
   templatesOpen: templatesOpenProp,
@@ -101,6 +103,18 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   const [paperFormat, setPaperFormat] = useState<'letter' | 'legal' | 'a4'>(
     activeWork?.paperSize || 'letter'
   );
+
+  // Sincronización reactiva inmediata de estado local ante cambios en el documento activo
+  const [syncedWorkId, setSyncedWorkId] = useState<string | null>(activeWork?.id || null);
+  if (activeWork && activeWork.id !== syncedWorkId) {
+    setSyncedWorkId(activeWork.id);
+    const workTitle = activeWork.title || 'Trabajo sin título';
+    const workPaper = activeWork.paperSize || 'letter';
+    setTitle(workTitle);
+    setPaperFormat(workPaper);
+  } else if (!activeWork && syncedWorkId !== null) {
+    setSyncedWorkId(null);
+  }
   const [pageInfo, setPageInfo] = useState<{
     pageCount: number;
     currentPage: number;
@@ -164,6 +178,11 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
 
   // Referencia a editor para inserción asíncrona de bloques en segundo plano
   const editorRef = useRef<any>(null);
+
+  // Banderas de control de sincronización para evitar sobrescrituras cruzadas entre documentos
+  const isSwitchingWorkRef = useRef<boolean>(false);
+  const loadedContentWorkIdRef = useRef<string | null>(activeWork?.id || null);
+  const titleDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Refs actualizadas para evitar cierres obsoletos dentro de TipTap onUpdate
   const activeWorkRef = useRef<StudyWorkDraft | null>(activeWork);
@@ -257,23 +276,32 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
     },
     content: activeWork?.contentHtml || '<p>Comienza a redactar tu trabajo...</p>',
     onUpdate: ({ editor }) => {
+      // 1. Silenciar si estamos cambiando de documento o transmitiendo bloques
+      if (isSwitchingWorkRef.current) {
+        return;
+      }
+
+      const currentWork = activeWorkRef.current;
+      // 2. Comprobar que el documento activo coincide con el contenido cargado en el editor TipTap
+      if (!currentWork || currentWork.id !== loadedContentWorkIdRef.current) {
+        return;
+      }
+
       const text = editor.getText();
       const words = text.trim() ? text.trim().split(/\s+/).length : 0;
       setSessionWordsWritten(Math.max(0, words - sessionStartWordsRef.current));
 
-      const currentWork = activeWorkRef.current;
-      if (currentWork) {
-        const updated: StudyWorkDraft = {
-          ...currentWork,
-          title: titleRef.current,
-          paperSize: paperFormatRef.current,
-          contentHtml: editor.getHTML(),
-          contentText: text,
-          wordCount: words,
-          updatedAt: new Date().toISOString(),
-        };
-        void onSaveWork(updated);
-      }
+      // 3. Guardar solo el contenido editado sin alterar el título ni la configuración de otro documento
+      const updated: StudyWorkDraft = {
+        ...currentWork,
+        title: titleRef.current || currentWork.title || 'Trabajo sin título',
+        paperSize: paperFormatRef.current || currentWork.paperSize || 'letter',
+        contentHtml: editor.getHTML(),
+        contentText: text,
+        wordCount: words,
+        updatedAt: new Date().toISOString(),
+      };
+      void onSaveWork(updated);
     },
   });
 
@@ -304,40 +332,66 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
 
   // Al cambiar de trabajo activo
   useEffect(() => {
-    if (activeWork) {
-      setTitle(activeWork.title);
-      const nextFormat: 'letter' | 'legal' | 'a4' =
-        activeWork.paperSize ||
-        ((typeof window !== 'undefined' &&
-          (window.localStorage.getItem('sf_writer_default_paper_format') as
-            | 'letter'
-            | 'legal'
-            | 'a4'
-            | null)) ||
-          'letter');
-      setPaperFormat(nextFormat);
-      if (editor && editor.commands.setPaperFormat) {
-        editor.commands.setPaperFormat(nextFormat);
-      }
-      if (editor && editor.getHTML() !== activeWork.contentHtml) {
-        editor.commands.setContent(activeWork.contentHtml || '<p>Comienza a redactar tu trabajo...</p>');
-        const text = editor.getText();
-        const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-        sessionStartWordsRef.current = words;
-        sessionStartTimeRef.current = Date.now();
-        setSessionWordsWritten(0);
-        setTimeout(() => {
-          if (editor) {
-            sanitizeAndPaginateOversizedNodes(editor);
-          }
-        }, 80);
-      }
+    if (!activeWork) {
+      loadedContentWorkIdRef.current = null;
+      return;
     }
+
+    if (!editor) return;
+
+    // Si ya está cargado este trabajo exactamente y el editor está en sincronía, no recargar
+    if (loadedContentWorkIdRef.current === activeWork.id) {
+      return;
+    }
+
+    // Activar guardia para evitar sobrescrituras cruzadas de nombres o formato
+    isSwitchingWorkRef.current = true;
+    loadedContentWorkIdRef.current = activeWork.id;
+
+    const currentDocTitle = activeWork.title || 'Trabajo sin título';
+    setTitle(currentDocTitle);
+    titleRef.current = currentDocTitle;
+
+    const nextFormat: 'letter' | 'legal' | 'a4' =
+      activeWork.paperSize ||
+      ((typeof window !== 'undefined' &&
+        (window.localStorage.getItem('sf_writer_default_paper_format') as
+          | 'letter'
+          | 'legal'
+          | 'a4'
+          | null)) ||
+        'letter');
+    setPaperFormat(nextFormat);
+    paperFormatRef.current = nextFormat;
+
+    if (editor.commands.setPaperFormat) {
+      editor.commands.setPaperFormat(nextFormat);
+    }
+
+    // Inyectar contenido en TipTap con emitUpdate: false para no disparar onUpdate espurio
+    editor.commands.setContent(
+      activeWork.contentHtml || '<p>Comienza a redactar tu trabajo...</p>',
+      { emitUpdate: false }
+    );
+
+    const text = editor.getText();
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    sessionStartWordsRef.current = words;
+    sessionStartTimeRef.current = Date.now();
+    setSessionWordsWritten(0);
+
+    setTimeout(() => {
+      isSwitchingWorkRef.current = false;
+      if (editor) {
+        sanitizeAndPaginateOversizedNodes(editor);
+      }
+    }, 60);
   }, [activeWork?.id, editor]);
 
   // Manejo de cambio de formato de papel (aplica a todo el documento completo y recuerda preferencia)
   const handleChangePaperFormat = (newFormat: 'letter' | 'legal' | 'a4') => {
     setPaperFormat(newFormat);
+    paperFormatRef.current = newFormat;
     if (typeof window !== 'undefined') {
       try {
         window.localStorage.setItem('sf_writer_default_paper_format', newFormat);
@@ -348,10 +402,11 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
     if (editor && editor.commands.setPaperFormat) {
       editor.commands.setPaperFormat(newFormat);
     }
-    if (activeWork && editor) {
+    const currentWork = activeWorkRef.current;
+    if (currentWork && editor) {
       const updated: StudyWorkDraft = {
-        ...activeWork,
-        title,
+        ...currentWork,
+        title: titleRef.current || currentWork.title || 'Trabajo sin título',
         paperSize: newFormat,
         contentHtml: editor.getHTML(),
         contentText: editor.getText(),
@@ -364,18 +419,64 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   // Manejo de cambio de título
   const handleTitleChange = (newTitle: string) => {
     setTitle(newTitle);
-    if (activeWork && editor) {
-      const updated: StudyWorkDraft = {
-        ...activeWork,
-        title: newTitle,
-        paperSize: paperFormat,
-        contentHtml: editor.getHTML(),
-        contentText: editor.getText(),
-        updatedAt: new Date().toISOString(),
-      };
-      void onSaveWork(updated);
+    titleRef.current = newTitle;
+
+    const currentWork = activeWorkRef.current;
+    if (!currentWork || !editor) return;
+
+    if (titleDebounceTimerRef.current) {
+      clearTimeout(titleDebounceTimerRef.current);
     }
+
+    // Debounce de 250ms para no saturar IndexedDB en cada pulsación y evitar re-renders lentos
+    titleDebounceTimerRef.current = setTimeout(() => {
+      const targetWork = activeWorkRef.current;
+      if (targetWork && targetWork.id === currentWork.id) {
+        const updated: StudyWorkDraft = {
+          ...targetWork,
+          title: newTitle,
+          paperSize: paperFormatRef.current || targetWork.paperSize || 'letter',
+          contentHtml: editor.getHTML(),
+          contentText: editor.getText(),
+          updatedAt: new Date().toISOString(),
+        };
+        void onSaveWork(updated);
+      }
+    }, 250);
   };
+
+  const handleTitleBlur = () => {
+    if (titleDebounceTimerRef.current) {
+      clearTimeout(titleDebounceTimerRef.current);
+      titleDebounceTimerRef.current = null;
+    }
+    const currentWork = activeWorkRef.current;
+    if (!currentWork || !editor) return;
+
+    const trimmed = title.trim() || 'Trabajo sin título';
+    if (trimmed !== title) {
+      setTitle(trimmed);
+      titleRef.current = trimmed;
+    }
+
+    const updated: StudyWorkDraft = {
+      ...currentWork,
+      title: trimmed,
+      paperSize: paperFormatRef.current || currentWork.paperSize || 'letter',
+      contentHtml: editor.getHTML(),
+      contentText: editor.getText(),
+      updatedAt: new Date().toISOString(),
+    };
+    void onSaveWork(updated);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (titleDebounceTimerRef.current) {
+        clearTimeout(titleDebounceTimerRef.current);
+      }
+    };
+  }, []);
 
   // Zoom handlers y Ajuste al Ancho
   const handleZoomIn = () => setZoomLevel((z) => Math.min(1.5, Number((z + 0.1).toFixed(2))));
@@ -439,24 +540,28 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   // Aplicar plantilla académica
   const handleSelectTemplate = useCallback(
     (tmpl: AcademicTemplate) => {
-      if (editor) {
+      if (editor && activeWork) {
         setTitle(tmpl.defaultTitle);
-        editor.commands.setContent(tmpl.htmlContent);
-        if (activeWork) {
-          const text = editor.getText();
-          const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-          const updated: StudyWorkDraft = {
-            ...activeWork,
-            title: tmpl.defaultTitle,
-            contentHtml: tmpl.htmlContent,
-            contentText: text,
-            wordCount: words,
-            targetWordCount: tmpl.targetWords,
-            updatedAt: new Date().toISOString(),
-          };
-          void onSaveWork(updated);
-          onNotify(`Plantilla "${tmpl.name}" cargada correctamente`, 'success');
-        }
+        titleRef.current = tmpl.defaultTitle;
+        isSwitchingWorkRef.current = true;
+        editor.commands.setContent(tmpl.htmlContent, { emitUpdate: false });
+        setTimeout(() => {
+          isSwitchingWorkRef.current = false;
+        }, 50);
+
+        const text = editor.getText();
+        const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+        const updated: StudyWorkDraft = {
+          ...activeWork,
+          title: tmpl.defaultTitle,
+          contentHtml: tmpl.htmlContent,
+          contentText: text,
+          wordCount: words,
+          targetWordCount: tmpl.targetWords,
+          updatedAt: new Date().toISOString(),
+        };
+        void onSaveWork(updated);
+        onNotify(`Plantilla "${tmpl.name}" cargada correctamente`, 'success');
       }
     },
     [editor, activeWork, onSaveWork, onNotify]
@@ -538,6 +643,8 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         if (templateId === 'blank') {
           if (onCreateNewWork) {
             const created = await onCreateNewWork(null);
+            setTitle(created.title);
+            titleRef.current = created.title;
             onSelectWork?.(created.id);
           } else {
             const newWork: StudyWorkDraft = {
@@ -550,6 +657,8 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };
+            setTitle(newWork.title);
+            titleRef.current = newWork.title;
             await onSaveWork(newWork);
             onSelectWork?.(newWork.id);
           }
@@ -561,6 +670,8 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         if (tmpl) {
           if (onCreateNewWork) {
             const created = await onCreateNewWork(tmpl);
+            setTitle(created.title);
+            titleRef.current = created.title;
             onSelectWork?.(created.id);
           } else {
             const words = tmpl.htmlContent.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).length;
@@ -574,6 +685,8 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };
+            setTitle(newWork.title);
+            titleRef.current = newWork.title;
             await onSaveWork(newWork);
             onSelectWork?.(newWork.id);
           }
@@ -612,6 +725,10 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
+        setTitle(tmpl.title);
+        titleRef.current = tmpl.title;
+        setPaperFormat(tmpl.paperSize || 'letter');
+        paperFormatRef.current = tmpl.paperSize || 'letter';
         await onSaveWork(newWork);
         onSelectWork?.(newWork.id);
         onNotify(`Plantilla comunitaria "${tmpl.title}" cargada`, 'success');
@@ -649,10 +766,11 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
       const newWorkId = `work_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const text = prepared.initialBlockHtml.replace(/<[^>]*>/g, ' ').trim();
       const words = text ? text.split(/\s+/).length : 0;
+      const docTitle = prepared.title.trim() || 'Documento Importado';
 
       const newWork: StudyWorkDraft = {
         id: newWorkId,
-        title: prepared.title,
+        title: docTitle,
         contentHtml: prepared.initialBlockHtml,
         contentText: text,
         wordCount: words,
@@ -662,9 +780,14 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
         updatedAt: new Date().toISOString(),
       };
 
+      setTitle(docTitle);
+      titleRef.current = docTitle;
+      setPaperFormat(prepared.paperSize);
+      paperFormatRef.current = prepared.paperSize;
+
       await onSaveWork(newWork);
       onSelectWork?.(newWork.id);
-      onNotify(`Documento "${prepared.title}" iniciado en Redacción`, 'success');
+      onNotify(`Documento "${docTitle}" iniciado en Redacción`, 'success');
 
       // Si el documento cuenta con bloques adicionales, transmitirlos en streaming progresivo
       if (prepared.remainingBlocks && prepared.remainingBlocks.length > 0) {
@@ -678,8 +801,13 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
             currentHtml += '\n' + blockHtml;
             const blockWords = currentHtml.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).length;
 
+            const currentTitle = titleRef.current || docTitle;
+            const currentPaper = paperFormatRef.current || prepared.paperSize;
+
             const updated: StudyWorkDraft = {
               ...newWork,
+              title: currentTitle,
+              paperSize: currentPaper,
               contentHtml: currentHtml,
               contentText: currentHtml.replace(/<[^>]*>/g, ' ').trim(),
               wordCount: blockWords,
@@ -687,10 +815,14 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
             };
             await onSaveWork(updated);
 
-            // Inyectar al final del editor TipTap sin interferir con el cursor del usuario
+            // Inyectar al final del editor TipTap silenciando onUpdate para no corromper títulos ni orden
             if (editorRef.current && activeWorkRef.current?.id === newWorkId) {
+              isSwitchingWorkRef.current = true;
               const docSize = editorRef.current.state.doc.content.size;
               editorRef.current.commands.insertContentAt(docSize, blockHtml);
+              setTimeout(() => {
+                isSwitchingWorkRef.current = false;
+              }, 40);
             }
 
             setImportProgress({
@@ -740,6 +872,7 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
           onSelectCommunityTemplate={handleSelectCommunityTemplateFromHub}
           onOpenWork={(id) => onSelectWork?.(id)}
           onDeleteWork={onDeleteWork}
+          onRenameWork={onRenameWork}
           onOpenImportModal={() => setIsImportModalOpen(true)}
           isCreating={isCreatingWork}
           creatingTemplateId={creatingTemplateId}
@@ -818,21 +951,24 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
             }}
           >
             <div className="flex-1 flex items-center gap-2.5">
-              <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-indigo-300 bg-indigo-500/15 border border-indigo-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm">
-                <FileText className="w-3.5 h-3.5 text-indigo-400" />
-                <span>
-                  {paperFormat === 'legal'
-                    ? 'Oficio (216×330)'
-                    : paperFormat === 'a4'
-                      ? 'A4 (210×297)'
-                      : 'Carta (216×279)'}
-                </span>
-              </span>
+              <div className="relative flex-shrink-0">
+                <select
+                  value={paperFormat}
+                  onChange={(e) => handleChangePaperFormat(e.target.value as 'letter' | 'legal' | 'a4')}
+                  className="text-[11px] font-mono font-bold uppercase tracking-wider text-indigo-300 bg-indigo-500/15 border border-indigo-500/30 hover:border-indigo-400 px-2.5 py-1.5 rounded-lg cursor-pointer outline-none transition-colors"
+                  title="Formato físico del papel (Carta, Oficio, A4)"
+                >
+                  <option value="letter" className="bg-slate-900 text-white">Carta (216×279)</option>
+                  <option value="legal" className="bg-slate-900 text-white">Oficio (216×330)</option>
+                  <option value="a4" className="bg-slate-900 text-white">A4 (210×297)</option>
+                </select>
+              </div>
 
               <input
                 type="text"
                 value={title}
                 onChange={(e) => handleTitleChange(e.target.value)}
+                onBlur={handleTitleBlur}
                 placeholder="Título de tu trabajo académico..."
                 className="flex-1 text-sm sm:text-base font-bold bg-slate-900/90 border border-slate-700/80 focus:border-indigo-400 rounded-xl px-3.5 py-1.5 text-white placeholder-slate-500 outline-none transition-all shadow-inner"
               />
