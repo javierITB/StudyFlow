@@ -771,6 +771,35 @@ function clearCachedStudySettings(): void {
   }
 }
 
+const WORK_FOLDER_CACHE_KEY = 'sf_work_folder_map';
+
+function readWorkFolderCache(): Record<string, string | null> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(WORK_FOLDER_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeWorkFolderCache(workId: string, folderId: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = readWorkFolderCache();
+    if (folderId) {
+      current[workId] = folderId;
+    } else {
+      delete current[workId];
+    }
+    window.localStorage.setItem(WORK_FOLDER_CACHE_KEY, JSON.stringify(current));
+  } catch {
+    // Ignorar errores de cuota de almacenamiento
+  }
+}
+
 export const App: React.FC = () => {
   const initialRoute = useMemo(
     () =>
@@ -1054,13 +1083,18 @@ export const App: React.FC = () => {
       setIncomingWorkShares(wShares);
 
       if (sWorks.length > 0) {
+        const folderCache = readWorkFolderCache();
         setWorks((prevWorks) => {
           const map = new Map<string, StudyWorkDraft>();
           for (const w of prevWorks) map.set(w.id, w);
           for (const sw of sWorks) {
             const existing = map.get(sw.id);
             if (!existing || new Date(sw.updatedAt).getTime() >= new Date(existing.updatedAt).getTime()) {
-              map.set(sw.id, { ...existing, ...sw });
+              map.set(sw.id, {
+                ...existing,
+                ...sw,
+                folderId: existing?.folderId ?? folderCache[sw.id] ?? sw.folderId ?? null,
+              });
             }
           }
           return Array.from(map.values());
@@ -1113,9 +1147,19 @@ export const App: React.FC = () => {
         let mergedWorks = cloud.works;
         if (cloud.worksTableAvailable) {
           const localWorks = await dbGetAll<StudyWorkDraft>('works').catch(() => []);
+          const localById = new Map<string, StudyWorkDraft>();
+          for (const lw of localWorks) {
+            localById.set(lw.id, lw);
+          }
+          const folderCache = readWorkFolderCache();
           const byId = new Map<string, StudyWorkDraft>();
           for (const cw of cloud.works) {
-            byId.set(cw.id, cw);
+            // Si Supabase aún no tiene la columna folder_id (migración v8 pendiente),
+            // conservar la carpeta asignada localmente en IndexedDB / localStorage.
+            const resolvedFolderId = cloud.worksFolderColumnAvailable
+              ? cw.folderId ?? null
+              : cw.folderId ?? localById.get(cw.id)?.folderId ?? folderCache[cw.id] ?? null;
+            byId.set(cw.id, { ...cw, folderId: resolvedFolderId });
           }
           const toPush: StudyWorkDraft[] = [];
           for (const lw of localWorks) {
@@ -1578,7 +1622,12 @@ export const App: React.FC = () => {
           const affectedWorks = works.filter((w) => w.folderId === folder.id);
           for (const work of affectedWorks) {
             const storedWork = await dbGet<StudyWorkDraft>('works', work.id);
-            const updatedWork: StudyWorkDraft = { ...(storedWork || work), folderId: null };
+            const updatedWork: StudyWorkDraft = {
+              ...(storedWork || work),
+              folderId: null,
+              updatedAt: new Date().toISOString(),
+            };
+            writeWorkFolderCache(work.id, null);
             await dbPut('works', updatedWork);
             if (!(updatedWork.isShared && updatedWork.sharedRole === 'viewer')) {
               void runCloudMutation((uid) => cloudUpsertWork(uid, updatedWork));
@@ -2159,9 +2208,11 @@ export const App: React.FC = () => {
       const updated: StudyWorkDraft = {
         ...existing,
         folderId,
+        updatedAt: new Date().toISOString(),
       };
+      writeWorkFolderCache(workId, folderId);
       setWorks((prev) => prev.map((w) => (w.id === workId ? updated : w)));
-      void dbPut('works', updated).catch(() => {});
+      await dbPut('works', updated).catch(() => {});
       if (
         userRef.current &&
         isSupabaseConfigured &&

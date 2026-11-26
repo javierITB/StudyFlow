@@ -103,6 +103,7 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
   tasks: TaskRecord[];
   works: StudyWorkDraft[];
   worksTableAvailable: boolean;
+  worksFolderColumnAvailable: boolean;
   studySettings: StudySettings;
   planState: PersistedPlanState | null;
   username: string | null;
@@ -198,6 +199,11 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
 
   // Si la tabla study_works aún no fue migrada en Supabase, no bloquear snapshot
   const worksTableAvailable = !worksRes.error;
+  const worksFolderColumnAvailable =
+    !worksRes.error && worksRes.data
+      ? worksRes.data.length === 0 ||
+        'folder_id' in (worksRes.data[0] as Record<string, unknown>)
+      : false;
   const works: StudyWorkDraft[] =
     !worksRes.error && worksRes.data
       ? worksRes.data.map((w) => mapWorkRow(w as Record<string, unknown>))
@@ -223,6 +229,7 @@ export async function fetchCloudSnapshot(userId: string): Promise<{
     tasks,
     works,
     worksTableAvailable,
+    worksFolderColumnAvailable,
     studySettings,
     planState,
     username: (profileRes.data?.username as string | null) ?? null,
