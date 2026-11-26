@@ -88,6 +88,7 @@ export function mapWorkRow(w: Record<string, unknown>): StudyWorkDraft {
       typeof w.target_word_count === 'number' ? w.target_word_count : null,
     tags: Array.isArray(w.tags) ? (w.tags as string[]) : undefined,
     linkedDocId: (w.linked_doc_id as string | null) ?? null,
+    folderId: (w.folder_id as string | null) ?? null,
     paperSize,
     createdAt: String(w.created_at || new Date().toISOString()),
     updatedAt: String(w.updated_at || new Date().toISOString()),
@@ -479,23 +480,65 @@ export async function cloudUpsertWork(
   work: StudyWorkDraft
 ): Promise<void> {
   if (!supabase) return;
-  const { error } = await supabase.from('study_works').upsert(
-    {
-      id: work.id,
-      user_id: userId,
-      title: work.title || 'Trabajo sin título',
-      content_html: work.contentHtml || '',
-      content_text: work.contentText || '',
-      word_count: work.wordCount || 0,
-      target_word_count: work.targetWordCount ?? null,
-      tags: work.tags || [],
-      linked_doc_id: work.linkedDocId || null,
-      paper_size: work.paperSize || 'letter',
-      created_at: work.createdAt,
-      updated_at: work.updatedAt,
-    },
-    { onConflict: 'id' }
-  );
+
+  // Los lectores invitados no pueden modificar el documento en la nube
+  if (work.isShared && work.sharedRole === 'viewer') {
+    return;
+  }
+
+  const basePayload = {
+    title: work.title || 'Trabajo sin título',
+    content_html: work.contentHtml || '',
+    content_text: work.contentText || '',
+    word_count: work.wordCount || 0,
+    target_word_count: work.targetWordCount ?? null,
+    tags: work.tags || [],
+    linked_doc_id: work.linkedDocId || null,
+    folder_id: work.folderId || null,
+    paper_size: work.paperSize || 'letter',
+    updated_at: work.updatedAt,
+  };
+
+  // Si es colaborador en un trabajo ajeno, actualizar sin sobrescribir user_id (propietario)
+  if (work.isShared && work.ownerId && work.ownerId !== userId) {
+    const { error } = await supabase
+      .from('study_works')
+      .update(basePayload)
+      .eq('id', work.id);
+
+    if (error && error.message?.includes('folder_id')) {
+      const { folder_id: _omit, ...fallbackPayload } = basePayload;
+      const retry = await supabase
+        .from('study_works')
+        .update(fallbackPayload)
+        .eq('id', work.id);
+      if (retry.error) throw retry.error;
+      return;
+    }
+    if (error) throw error;
+    return;
+  }
+
+  const fullPayload = {
+    id: work.id,
+    user_id: userId,
+    ...basePayload,
+    created_at: work.createdAt,
+  };
+
+  const { error } = await supabase
+    .from('study_works')
+    .upsert(fullPayload, { onConflict: 'id' });
+
+  // Respaldo si la migración v8 (folder_id) aún no se ha ejecutado en Supabase
+  if (error && error.message?.includes('folder_id')) {
+    const { folder_id: _omit, ...fallbackPayload } = fullPayload;
+    const retry = await supabase
+      .from('study_works')
+      .upsert(fallbackPayload, { onConflict: 'id' });
+    if (retry.error) throw retry.error;
+    return;
+  }
   if (error) throw error;
 }
 

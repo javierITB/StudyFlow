@@ -1,12 +1,19 @@
 import React, { useMemo, useState } from 'react';
 import {
   Check,
+  ChevronDown,
   ChevronLeft,
+  ChevronRight,
   FilePlus,
   FileText,
+  Folder,
+  FolderInput,
+  FolderOpen,
   FolderPlus,
+  GripVertical,
   Pencil,
   PenTool,
+  Plus,
   Search,
   Share2,
   Sliders,
@@ -17,16 +24,30 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { StudyWorkDraft, UserProfile } from '../../types/studyflow';
+import { FolderColor, FolderRecord, StudyWorkDraft, UserProfile } from '../../types/studyflow';
+import { FOLDER_COLOR_CLASSES } from '../../lib/documentUtils';
+
+const FOLDER_COLORS: FolderColor[] = [
+  'indigo',
+  'emerald',
+  'amber',
+  'rose',
+  'sky',
+  'purple',
+];
 
 interface WorksSidebarProps {
   works: StudyWorkDraft[];
+  folders?: FolderRecord[];
   activeWorkId: string | null;
   onSelectWork: (id: string | null) => void;
   onCreateNewWork: () => void;
   onDeleteWork: (id: string) => void;
   onRenameWork?: (id: string, newTitle: string) => void;
   onShareWork?: (work: StudyWorkDraft) => void;
+  onCreateFolder?: (name: string, color: FolderColor) => Promise<void>;
+  onDeleteFolder?: (folder: FolderRecord) => void;
+  onMoveWorkToFolder?: (workId: string, folderId: string | null) => Promise<void>;
   onCloseDrawer?: () => void;
   onOpenTemplates: () => void;
   onOpenImportModal?: () => void;
@@ -38,12 +59,16 @@ interface WorksSidebarProps {
 
 export const WorksSidebar: React.FC<WorksSidebarProps> = ({
   works,
+  folders = [],
   activeWorkId,
   onSelectWork,
   onCreateNewWork,
   onDeleteWork,
   onRenameWork,
   onShareWork,
+  onCreateFolder,
+  onDeleteFolder,
+  onMoveWorkToFolder,
   onCloseDrawer,
   onOpenTemplates,
   onOpenImportModal,
@@ -55,6 +80,12 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [showNewFolderForm, setShowNewFolderForm] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderColor, setNewFolderColor] = useState<FolderColor>('indigo');
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [moveMenuWorkId, setMoveMenuWorkId] = useState<string | null>(null);
 
   // Orden consistente y estable: los trabajos más recientes arriba
   const sortedWorks = useMemo(() => {
@@ -63,9 +94,59 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
     );
   }, [works]);
 
-  const filteredWorks = sortedWorks.filter((w) =>
-    (w.title || '').toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredWorks = useMemo(
+    () =>
+      sortedWorks.filter((w) =>
+        (w.title || '').toLowerCase().includes(searchQuery.toLowerCase())
+      ),
+    [sortedWorks, searchQuery]
   );
+
+  const validFolderIds = useMemo(() => new Set(folders.map((f) => f.id)), [folders]);
+
+  const worksByFolder = useMemo(() => {
+    const map = new Map<string | null, StudyWorkDraft[]>();
+    map.set(null, []);
+    for (const f of folders) {
+      map.set(f.id, []);
+    }
+    for (const w of filteredWorks) {
+      const key = w.folderId && validFolderIds.has(w.folderId) ? w.folderId : null;
+      const list = map.get(key) || [];
+      list.push(w);
+      map.set(key, list);
+    }
+    return map;
+  }, [filteredWorks, folders, validFolderIds]);
+
+  const toggleFolderExpanded = (folderKey: string) => {
+    setCollapsedFolders((prev) => ({
+      ...prev,
+      [folderKey]: !prev[folderKey],
+    }));
+  };
+
+  const handleCreateFolderSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newFolderName.trim();
+    if (!trimmed || !onCreateFolder) return;
+    await onCreateFolder(trimmed, newFolderColor);
+    setNewFolderName('');
+    setShowNewFolderForm(false);
+  };
+
+  const handleFolderDrop = async (e: React.DragEvent, targetFolderId: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverFolderId(null);
+    const workId = e.dataTransfer.getData('application/x-studyflow-work');
+    if (workId && onMoveWorkToFolder) {
+      await onMoveWorkToFolder(workId, targetFolderId);
+      if (targetFolderId) {
+        setCollapsedFolders((prev) => ({ ...prev, [targetFolderId]: false }));
+      }
+    }
+  };
 
   const handleStartRename = (e: React.MouseEvent, work: StudyWorkDraft) => {
     e.stopPropagation();
@@ -177,15 +258,72 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
           </div>
         </button>
 
-        {filteredWorks.length > 0 && (
-          <div className="pt-2">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1 mb-1.5">
+        {works.length > 0 || folders.length > 0 ? (
+          <div className="pt-2 flex items-center justify-between px-1 mb-1">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Mis Redacciones ({filteredWorks.length})
             </div>
+            {onCreateFolder && (
+              <button
+                type="button"
+                onClick={() => setShowNewFolderForm((v) => !v)}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-[10px] font-semibold text-indigo-300 transition-colors"
+                title="Nueva carpeta para ordenar redacciones"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Carpeta</span>
+              </button>
+            )}
           </div>
+        ) : null}
+
+        {showNewFolderForm && onCreateFolder && (
+          <form
+            onSubmit={handleCreateFolderSubmit}
+            className="p-2.5 rounded-xl bg-slate-900/95 border border-indigo-500/35 space-y-2"
+          >
+            <input
+              type="text"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              placeholder="Nombre de la carpeta..."
+              autoFocus
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                {FOLDER_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setNewFolderColor(c)}
+                    className={`w-3.5 h-3.5 rounded-full ${FOLDER_COLOR_CLASSES[c].dot} ${
+                      newFolderColor === c ? 'ring-2 ring-white scale-110' : 'opacity-65'
+                    }`}
+                    title={c}
+                  />
+                ))}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setShowNewFolderForm(false)}
+                  className="px-2 py-1 rounded-lg text-[10px] text-slate-400 hover:text-white"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold"
+                >
+                  Crear
+                </button>
+              </div>
+            </div>
+          </form>
         )}
 
-        {filteredWorks.length === 0 ? (
+        {filteredWorks.length === 0 && folders.length === 0 ? (
           <div className="text-center py-6 px-3 text-slate-500 space-y-2">
             <FileText className="w-7 h-7 mx-auto text-slate-600 opacity-60" />
             <p className="text-xs font-medium text-slate-400">Sin borradores guardados</p>
@@ -194,181 +332,387 @@ export const WorksSidebar: React.FC<WorksSidebarProps> = ({
             </p>
           </div>
         ) : (
-          filteredWorks.map((work) => {
-            const isActive = work.id === activeWorkId;
-            const targetPct =
-              work.targetWordCount && work.targetWordCount > 0
-                ? Math.min(100, Math.round((work.wordCount / work.targetWordCount) * 100))
-                : null;
+          <div className="space-y-2">
+            {(() => {
+              const renderWorkCard = (work: StudyWorkDraft) => {
+                const isActive = work.id === activeWorkId;
+                const isMoveOpen = moveMenuWorkId === work.id;
+                const targetPct =
+                  work.targetWordCount && work.targetWordCount > 0
+                    ? Math.min(100, Math.round((work.wordCount / work.targetWordCount) * 100))
+                    : null;
 
-            return (
-              <div
-                key={work.id}
-                onClick={() => onSelectWork(work.id)}
-                className={`p-3 rounded-xl border transition-all cursor-pointer group space-y-2 ${
-                  isActive
-                    ? 'bg-indigo-500/20 border-indigo-400/90 ring-1 ring-indigo-500/40 shadow-sm'
-                    : 'bg-slate-900/85 border-indigo-500/20 hover:border-indigo-400/50 hover:bg-slate-900'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-1.5">
-                  {editingWorkId === work.id ? (
+                return (
+                  <div key={work.id} className="relative">
                     <div
-                      className="flex items-center gap-1.5 flex-1 min-w-0"
-                      onClick={(e) => e.stopPropagation()}
+                      draggable={Boolean(onMoveWorkToFolder)}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('application/x-studyflow-work', work.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onClick={() => onSelectWork(work.id)}
+                      className={`p-2.5 rounded-xl border transition-all cursor-pointer group space-y-1.5 ${
+                        isActive
+                          ? 'bg-indigo-500/20 border-indigo-400/90 ring-1 ring-indigo-500/40 shadow-sm'
+                          : 'bg-slate-900/85 border-indigo-500/20 hover:border-indigo-400/50 hover:bg-slate-900'
+                      }`}
                     >
-                      <input
-                        type="text"
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleSaveRename(work.id);
-                          } else if (e.key === 'Escape') {
-                            handleCancelRename();
-                          }
-                        }}
-                        autoFocus
-                        placeholder="Nombre del documento..."
-                        className="flex-1 bg-slate-950 border border-indigo-400 rounded-lg px-2 py-0.5 text-xs text-white outline-none focus:ring-1 focus:ring-indigo-400 font-semibold"
-                      />
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSaveRename(work.id);
-                        }}
-                        className="p-1 rounded text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/20 transition-colors"
-                        title="Guardar nombre"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleCancelRename();
-                        }}
-                        className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
-                        title="Cancelar"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-start justify-between gap-1.5">
+                        {editingWorkId === work.id ? (
+                          <div
+                            className="flex items-center gap-1.5 flex-1 min-w-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="text"
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSaveRename(work.id);
+                                } else if (e.key === 'Escape') {
+                                  handleCancelRename();
+                                }
+                              }}
+                              autoFocus
+                              placeholder="Nombre del documento..."
+                              className="flex-1 bg-slate-950 border border-indigo-400 rounded-lg px-2 py-0.5 text-xs text-white outline-none focus:ring-1 focus:ring-indigo-400 font-semibold"
+                            />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSaveRename(work.id);
+                              }}
+                              className="p-1 rounded text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                              title="Guardar nombre"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCancelRename();
+                              }}
+                              className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                              title="Cancelar"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div
+                              className="flex items-center gap-1.5 min-w-0 flex-1"
+                              onDoubleClick={(e) => handleStartRename(e, work)}
+                              title="Doble clic para renombrar"
+                            >
+                              {onMoveWorkToFolder && (
+                                <span
+                                  className="text-slate-600 hover:text-slate-400 cursor-grab active:cursor-grabbing flex-shrink-0"
+                                  title="Arrastra hacia otra carpeta"
+                                >
+                                  <GripVertical className="w-3 h-3" />
+                                </span>
+                              )}
+                              <div
+                                className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${
+                                  isActive
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
+                                }`}
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                              </div>
+                              <span className="text-xs font-semibold text-white truncate group-hover:text-indigo-300 transition-colors">
+                                {work.title || 'Trabajo sin título'}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-0.5 opacity-80 group-hover:opacity-100 flex-shrink-0">
+                              {onShareWork && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onShareWork(work);
+                                  }}
+                                  className="p-1 rounded text-slate-400 hover:text-teal-300 hover:bg-slate-800"
+                                  title="Compartir redacción (en vivo o copia)"
+                                >
+                                  <Share2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {onMoveWorkToFolder && folders.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setMoveMenuWorkId((prev) =>
+                                      prev === work.id ? null : work.id
+                                    );
+                                  }}
+                                  className="p-1 rounded text-slate-400 hover:text-amber-300 hover:bg-slate-800"
+                                  title="Mover a carpeta"
+                                >
+                                  <FolderInput className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => handleStartRename(e, work)}
+                                className="p-1 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800"
+                                title="Renombrar trabajo"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onExportToReadings(work);
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-purple-300 hover:bg-slate-800"
+                                title="Agregar a biblioteca de Lecturas"
+                              >
+                                <FolderPlus className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDeleteWork(work.id);
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800"
+                                title={
+                                  work.isShared
+                                    ? 'Salir de redacción compartida'
+                                    : 'Eliminar trabajo'
+                                }
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-mono truncate">
+                            {work.wordCount} {work.wordCount === 1 ? 'palabra' : 'palabras'}
+                          </span>
+                          {work.paperSize && (
+                            <span className="px-1.5 py-0.2 rounded bg-indigo-500/15 border border-indigo-500/25 text-[9px] font-mono text-indigo-300 uppercase shrink-0">
+                              {work.paperSize === 'legal'
+                                ? 'Oficio'
+                                : work.paperSize === 'a4'
+                                  ? 'A4'
+                                  : 'Carta'}
+                            </span>
+                          )}
+                          {work.isShared && (
+                            <span
+                              className="px-1.5 py-0.2 rounded bg-teal-500/15 border border-teal-500/30 text-[9px] font-medium text-teal-300 flex items-center gap-0.5 shrink-0"
+                              title={
+                                work.ownerUsername
+                                  ? `Compartido por @${work.ownerUsername}`
+                                  : 'Redacción colaborativa'
+                              }
+                            >
+                              <Users className="w-2.5 h-2.5 text-teal-400" />
+                              <span>Colab{work.ownerUsername ? ` @${work.ownerUsername}` : ''}</span>
+                            </span>
+                          )}
+                        </div>
+                        <span>{new Date(work.updatedAt).toLocaleDateString('es-ES')}</span>
+                      </div>
+
+                      {targetPct !== null && (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-slate-400 flex items-center gap-1">
+                              <Target className="w-3 h-3 text-indigo-400" />
+                              <span>Meta {work.targetWordCount}</span>
+                            </span>
+                            <span className="font-mono text-indigo-300 font-semibold">
+                              {targetPct}%
+                            </span>
+                          </div>
+                          <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-indigo-500 rounded-full transition-all"
+                              style={{ width: `${targetPct}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <>
+
+                    {isMoveOpen && onMoveWorkToFolder && (
                       <div
-                        className="flex items-center gap-2 min-w-0 flex-1"
-                        onDoubleClick={(e) => handleStartRename(e, work)}
-                        title="Doble clic para renombrar"
+                        className="mt-1 p-1.5 rounded-xl bg-slate-950 border border-indigo-500/35 shadow-xl space-y-0.5 z-20"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <div
-                          className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${
-                            isActive
-                              ? 'bg-indigo-600 text-white'
-                              : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
+                        <div className="text-[10px] font-semibold text-slate-400 px-2 py-0.5">
+                          Mover a carpeta:
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void onMoveWorkToFolder(work.id, null);
+                            setMoveMenuWorkId(null);
+                          }}
+                          className={`w-full text-left px-2 py-1 rounded-lg text-[11px] flex items-center justify-between ${
+                            !work.folderId
+                              ? 'bg-indigo-600/25 text-indigo-200 font-semibold'
+                              : 'text-slate-300 hover:bg-slate-800'
                           }`}
                         >
-                          <FileText className="w-3.5 h-3.5" />
-                        </div>
-                        <span className="text-xs font-semibold text-white truncate group-hover:text-indigo-300 transition-colors">
-                          {work.title || 'Trabajo sin título'}
-                        </span>
+                          <span>Sin carpeta (Raíz)</span>
+                          {!work.folderId && <Check className="w-3 h-3 text-indigo-400" />}
+                        </button>
+                        {folders.map((f) => {
+                          const c = FOLDER_COLOR_CLASSES[f.color || 'indigo'];
+                          const selected = work.folderId === f.id;
+                          return (
+                            <button
+                              key={f.id}
+                              type="button"
+                              onClick={() => {
+                                void onMoveWorkToFolder(work.id, f.id);
+                                setMoveMenuWorkId(null);
+                              }}
+                              className={`w-full text-left px-2 py-1 rounded-lg text-[11px] flex items-center justify-between gap-2 ${
+                                selected
+                                  ? 'bg-indigo-600/25 text-white font-semibold'
+                                  : 'text-slate-300 hover:bg-slate-800'
+                              }`}
+                            >
+                              <span className="flex items-center gap-1.5 truncate">
+                                <span className={`w-2 h-2 rounded-full ${c.dot} shrink-0`} />
+                                <span className="truncate">{f.name}</span>
+                              </span>
+                              {selected && <Check className="w-3 h-3 text-indigo-400 shrink-0" />}
+                            </button>
+                          );
+                        })}
                       </div>
-
-                      <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 flex-shrink-0">
-                        {onShareWork && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onShareWork(work);
-                            }}
-                            className="p-1 rounded text-slate-400 hover:text-teal-300 hover:bg-slate-800"
-                            title="Compartir redacción (en vivo o copia)"
-                          >
-                            <Share2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={(e) => handleStartRename(e, work)}
-                          className="p-1 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800"
-                          title="Renombrar trabajo"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onExportToReadings(work);
-                          }}
-                          className="p-1 rounded text-slate-400 hover:text-purple-300 hover:bg-slate-800"
-                          title="Agregar a biblioteca de Lecturas"
-                        >
-                          <FolderPlus className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteWork(work.id);
-                          }}
-                          className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800"
-                          title="Eliminar trabajo"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between text-[10px] text-slate-400">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="font-mono truncate">
-                      {work.wordCount} {work.wordCount === 1 ? 'palabra' : 'palabras'}
-                    </span>
-                    {work.paperSize && (
-                      <span className="px-1.5 py-0.2 rounded bg-indigo-500/15 border border-indigo-500/25 text-[9px] font-mono text-indigo-300 uppercase shrink-0">
-                        {work.paperSize === 'legal' ? 'Oficio' : work.paperSize === 'a4' ? 'A4' : 'Carta'}
-                      </span>
-                    )}
-                    {work.isShared && (
-                      <span
-                        className="px-1.5 py-0.2 rounded bg-teal-500/15 border border-teal-500/30 text-[9px] font-medium text-teal-300 flex items-center gap-0.5 shrink-0"
-                        title={work.ownerUsername ? `Compartido por @${work.ownerUsername}` : 'Redacción colaborativa'}
-                      >
-                        <Users className="w-2.5 h-2.5 text-teal-400" />
-                        <span>Colab{work.ownerUsername ? ` @${work.ownerUsername}` : ''}</span>
-                      </span>
                     )}
                   </div>
-                  <span>{new Date(work.updatedAt).toLocaleDateString('es-ES')}</span>
-                </div>
+                );
+              };
 
-                {targetPct !== null && (
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[10px]">
-                      <span className="text-slate-400 flex items-center gap-1">
-                        <Target className="w-3 h-3 text-indigo-400" />
-                        <span>Meta {work.targetWordCount}</span>
-                      </span>
-                      <span className="font-mono text-indigo-300 font-semibold">{targetPct}%</span>
-                    </div>
-                    <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+              const rootWorks = worksByFolder.get(null) || [];
+
+              return (
+                <>
+                  {folders.map((folder) => {
+                    const folderWorks = worksByFolder.get(folder.id) || [];
+                    const isCollapsed = Boolean(collapsedFolders[folder.id]);
+                    const colorCfg = FOLDER_COLOR_CLASSES[folder.color || 'indigo'];
+                    const isDragTarget = dragOverFolderId === folder.id;
+
+                    return (
                       <div
-                        className="h-full bg-indigo-500 rounded-full transition-all"
-                        style={{ width: `${targetPct}%` }}
-                      />
+                        key={folder.id}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDragOverFolderId(folder.id);
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverFolderId === folder.id) setDragOverFolderId(null);
+                        }}
+                        onDrop={(e) => void handleFolderDrop(e, folder.id)}
+                        className={`rounded-xl border transition-colors ${
+                          isDragTarget
+                            ? 'border-indigo-400 bg-indigo-500/15'
+                            : 'border-slate-800/80 bg-slate-900/40'
+                        }`}
+                      >
+                        <div
+                          onClick={() => toggleFolderExpanded(folder.id)}
+                          className="flex items-center justify-between px-2.5 py-2 cursor-pointer group"
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {isCollapsed ? (
+                              <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            )}
+                            {isCollapsed ? (
+                              <Folder className={`w-3.5 h-3.5 ${colorCfg.iconText} shrink-0`} />
+                            ) : (
+                              <FolderOpen className={`w-3.5 h-3.5 ${colorCfg.iconText} shrink-0`} />
+                            )}
+                            <span className="text-xs font-semibold text-slate-200 truncate">
+                              {folder.name}
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                              ({folderWorks.length})
+                            </span>
+                          </div>
+                          {onDeleteFolder && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteFolder(folder);
+                              }}
+                              className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Eliminar carpeta"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+
+                        {!isCollapsed && (
+                          <div className="px-2 pb-2 space-y-1.5">
+                            {folderWorks.length === 0 ? (
+                              <div className="text-[10px] text-slate-500 italic px-2 py-1.5">
+                                Arrastra o mueve una redacción aquí
+                              </div>
+                            ) : (
+                              folderWorks.map(renderWorkCard)
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Trabajos sin carpeta */}
+                  {(rootWorks.length > 0 || folders.length > 0) && (
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOverFolderId('__root__');
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverFolderId === '__root__') setDragOverFolderId(null);
+                      }}
+                      onDrop={(e) => void handleFolderDrop(e, null)}
+                      className={`space-y-1.5 rounded-xl transition-colors ${
+                        dragOverFolderId === '__root__'
+                          ? 'bg-indigo-500/10 ring-1 ring-indigo-400/50 p-1.5'
+                          : ''
+                      }`}
+                    >
+                      {folders.length > 0 && (
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 px-1 pt-1">
+                          Sin carpeta ({rootWorks.length})
+                        </div>
+                      )}
+                      {rootWorks.map(renderWorkCard)}
                     </div>
-                  </div>
-                )}
-              </div>
-            );
-          })
+                  )}
+                </>
+              );
+            })()}
+          </div>
         )}
       </div>
 

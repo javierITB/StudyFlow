@@ -240,6 +240,7 @@ interface WorkspaceShellProps {
   onCreateNewWork: (template?: AcademicTemplate | null) => Promise<StudyWorkDraft>;
   onDeleteWork: (id: string) => Promise<void>;
   onRenameWork?: (id: string, newTitle: string) => Promise<void>;
+  onMoveWorkToFolder: (workId: string, folderId: string | null) => Promise<void>;
   onExportWorkToReadings: (work: StudyWorkDraft, folderId: string | null) => Promise<void>;
   activeWorkId: string | null;
   onSelectWork: (id: string | null) => void;
@@ -318,6 +319,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   onCreateNewWork,
   onDeleteWork,
   onRenameWork,
+  onMoveWorkToFolder,
   onExportWorkToReadings,
   activeWorkId,
   onSelectWork,
@@ -425,6 +427,7 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
             ) : (
               <WorksSidebar
                 works={works}
+                folders={folders}
                 activeWorkId={activeWorkId}
                 onSelectWork={(id) => {
                   onSelectWork(id);
@@ -438,6 +441,9 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 onDeleteWork={onDeleteWork}
                 onRenameWork={onRenameWork}
                 onShareWork={onShareWork}
+                onCreateFolder={onCreateFolder}
+                onDeleteFolder={onDeleteFolder}
+                onMoveWorkToFolder={onMoveWorkToFolder}
                 onCloseDrawer={() => onSetSidebarOpen(false)}
                 onOpenTemplates={() => {
                   onSelectWork(null);
@@ -542,6 +548,9 @@ const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
                 notes={notes}
                 documents={documents}
                 folders={folders}
+                onCreateFolder={onCreateFolder}
+                onDeleteFolder={onDeleteFolder}
+                onMoveWorkToFolder={onMoveWorkToFolder}
                 onSaveWork={onSaveWork}
                 onCreateNewWork={onCreateNewWork}
                 onDeleteWork={onDeleteWork}
@@ -1566,12 +1575,25 @@ export const App: React.FC = () => {
             prev.map((d) => (d.folderId === folder.id ? { ...d, folderId: null } : d))
           );
 
+          const affectedWorks = works.filter((w) => w.folderId === folder.id);
+          for (const work of affectedWorks) {
+            const storedWork = await dbGet<StudyWorkDraft>('works', work.id);
+            const updatedWork: StudyWorkDraft = { ...(storedWork || work), folderId: null };
+            await dbPut('works', updatedWork);
+            if (!(updatedWork.isShared && updatedWork.sharedRole === 'viewer')) {
+              void runCloudMutation((uid) => cloudUpsertWork(uid, updatedWork));
+            }
+          }
+          setWorks((prev) =>
+            prev.map((w) => (w.folderId === folder.id ? { ...w, folderId: null } : w))
+          );
+
           void runCloudMutation((uid) => cloudDeleteFolder(uid, folder.id));
           notify('Carpeta eliminada', 'info');
         },
       });
     },
-    [documents, notify, runCloudMutation]
+    [documents, works, notify, runCloudMutation]
   );
 
   const handleMoveDocumentToFolder = useCallback(
@@ -2002,6 +2024,9 @@ export const App: React.FC = () => {
       if (existingTimer) {
         clearTimeout(existingTimer);
       }
+      if (work.isShared && work.sharedRole === 'viewer') {
+        return;
+      }
       const timer = setTimeout(() => {
         workSyncTimersRef.current.delete(work.id);
         const currentUser = userRef.current;
@@ -2067,20 +2092,37 @@ export const App: React.FC = () => {
         clearTimeout(pendingTimer);
         workSyncTimersRef.current.delete(id);
       }
+      const target = works.find((w) => w.id === id);
       setWorks((prev) => prev.filter((w) => w.id !== id));
       void dbDelete('works', id).catch(() => {});
       if (userRef.current && isSupabaseConfigured) {
-        void cloudDeleteWork(userRef.current.id, id).catch((err) => {
-          console.warn('[StudyFlow] Error eliminando borrador en Supabase:', err);
-        });
+        if (target?.isShared && target.shareId) {
+          void updateWorkShareStatusOrRole(target.shareId, { status: 'revoked' }).catch((err) => {
+            console.warn('[StudyFlow] Error saliendo de redacción compartida:', err);
+          });
+        } else {
+          void cloudDeleteWork(userRef.current.id, id).catch((err) => {
+            console.warn('[StudyFlow] Error eliminando borrador en Supabase:', err);
+          });
+        }
       }
-      notify('Trabajo eliminado del taller de redacción', 'info');
+      notify(
+        target?.isShared
+          ? 'Saliste de la redacción colaborativa'
+          : 'Trabajo eliminado del taller de redacción',
+        'info'
+      );
     },
-    [notify]
+    [works, notify]
   );
 
   const handleRenameWork = useCallback(
     async (id: string, newTitle: string) => {
+      const existing = works.find((w) => w.id === id);
+      if (existing?.isShared && existing.sharedRole === 'viewer') {
+        notify('Solo lectura: no puedes renombrar una redacción compartida como lector', 'warning');
+        return;
+      }
       const cleanTitle = newTitle.trim() || 'Trabajo sin título';
       let targetWork: StudyWorkDraft | null = null;
       setWorks((prev) =>
@@ -2107,7 +2149,34 @@ export const App: React.FC = () => {
         notify(`Trabajo renombrado a "${cleanTitle}"`, 'success');
       }
     },
-    [notify]
+    [works, notify]
+  );
+
+  const handleMoveWorkToFolder = useCallback(
+    async (workId: string, folderId: string | null) => {
+      const existing = works.find((w) => w.id === workId);
+      if (!existing) return;
+      const updated: StudyWorkDraft = {
+        ...existing,
+        folderId,
+      };
+      setWorks((prev) => prev.map((w) => (w.id === workId ? updated : w)));
+      void dbPut('works', updated).catch(() => {});
+      if (
+        userRef.current &&
+        isSupabaseConfigured &&
+        !(updated.isShared && updated.sharedRole === 'viewer')
+      ) {
+        void cloudUpsertWork(userRef.current.id, updated).catch((err) => {
+          console.warn('[StudyFlow] Error actualizando carpeta del borrador:', err);
+        });
+      }
+      const folderName = folderId
+        ? folders.find((f) => f.id === folderId)?.name || 'carpeta'
+        : 'Sin carpeta';
+      notify(`Redacción movida a "${folderName}"`, 'success');
+    },
+    [works, folders, notify]
   );
 
   const handleExportWorkToReadings = useCallback(
@@ -3134,6 +3203,7 @@ export const App: React.FC = () => {
         onCreateNewWork={handleCreateNewWork}
         onDeleteWork={handleDeleteWork}
         onRenameWork={handleRenameWork}
+        onMoveWorkToFolder={handleMoveWorkToFolder}
         onExportWorkToReadings={handleExportWorkToReadings}
         activeWorkId={activeWorkId}
         onSelectWork={setActiveWorkId}

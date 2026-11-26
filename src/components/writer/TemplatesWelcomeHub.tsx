@@ -6,6 +6,8 @@ import {
   FilePlus2,
   FileText,
   FlaskConical,
+  Folder,
+  FolderPlus,
   Globe,
   GraduationCap,
   Lightbulb,
@@ -22,7 +24,22 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { CommunityTemplateRecord, StudyWorkDraft } from '../../types/studyflow';
+import {
+  CommunityTemplateRecord,
+  FolderColor,
+  FolderRecord,
+  StudyWorkDraft,
+} from '../../types/studyflow';
+import { FOLDER_COLOR_CLASSES } from '../../lib/documentUtils';
+
+const HUB_FOLDER_COLORS: FolderColor[] = [
+  'indigo',
+  'emerald',
+  'amber',
+  'rose',
+  'sky',
+  'purple',
+];
 import { fetchTopCommunityTemplates, rateCommunityTemplate } from '../../lib/communityTemplates';
 import { CommunityCatalogModal } from './CommunityCatalogModal';
 
@@ -92,6 +109,10 @@ export const TEMPLATE_CARDS: TemplateCardItem[] = [
 
 export interface TemplatesWelcomeHubProps {
   works: StudyWorkDraft[];
+  folders?: FolderRecord[];
+  onCreateFolder?: (name: string, color: FolderColor) => Promise<void>;
+  onDeleteFolder?: (folder: FolderRecord) => void;
+  onMoveWorkToFolder?: (workId: string, folderId: string | null) => Promise<void>;
   onSelectTemplate: (templateId: string) => void;
   onSelectCommunityTemplate?: (tmpl: CommunityTemplateRecord) => void;
   onOpenWork: (id: string) => void;
@@ -108,6 +129,10 @@ export interface TemplatesWelcomeHubProps {
 
 export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
   works,
+  folders = [],
+  onCreateFolder,
+  onDeleteFolder,
+  onMoveWorkToFolder,
   onSelectTemplate,
   onSelectCommunityTemplate,
   onOpenWork,
@@ -123,13 +148,34 @@ export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
 }) => {
   const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  const [selectedFolderFilter, setSelectedFolderFilter] = useState<string | 'all' | 'unfiled'>('all');
+  const [showHubNewFolder, setShowHubNewFolder] = useState(false);
+  const [hubNewFolderName, setHubNewFolderName] = useState('');
+  const [hubNewFolderColor, setHubNewFolderColor] = useState<FolderColor>('indigo');
+
+  const validFolderIds = useMemo(() => new Set(folders.map((f) => f.id)), [folders]);
 
   // Orden consistente: documentos editados más recientemente primero
   const sortedWorks = useMemo(() => {
-    return [...works].sort(
+    const filtered = works.filter((w) => {
+      if (selectedFolderFilter === 'all') return true;
+      const wFolderId = w.folderId && validFolderIds.has(w.folderId) ? w.folderId : null;
+      if (selectedFolderFilter === 'unfiled') return wFolderId === null;
+      return wFolderId === selectedFolderFilter;
+    });
+    return [...filtered].sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     );
-  }, [works]);
+  }, [works, selectedFolderFilter, validFolderIds]);
+
+  const handleHubCreateFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = hubNewFolderName.trim();
+    if (!trimmed || !onCreateFolder) return;
+    await onCreateFolder(trimmed, hubNewFolderColor);
+    setHubNewFolderName('');
+    setShowHubNewFolder(false);
+  };
 
   const handleStartRename = (e: React.MouseEvent, work: StudyWorkDraft) => {
     e.stopPropagation();
@@ -324,20 +370,147 @@ export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
         {/* ========================================================================= */}
         {/* SECCIÓN 1: TRABAJOS GUARDADOS (MIS REDACCIONES EXISTENTES)               */}
         {/* ========================================================================= */}
-        {works.length > 0 && (
+        {(works.length > 0 || folders.length > 0) && (
           <div className="space-y-4 pt-2">
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-indigo-400" />
                 <h2 className="text-sm font-bold uppercase tracking-wider text-slate-200">
                   Tus Redacciones en Curso
                 </h2>
               </div>
-              <span className="text-xs text-slate-500 font-mono">
-                {works.length} trabajo{works.length > 1 ? 's' : ''}
-              </span>
+              <div className="flex items-center gap-2">
+                {onCreateFolder && (
+                  <button
+                    type="button"
+                    onClick={() => setShowHubNewFolder((v) => !v)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 text-xs font-semibold transition-colors"
+                  >
+                    <FolderPlus className="w-3.5 h-3.5" />
+                    <span>Nueva carpeta</span>
+                  </button>
+                )}
+                <span className="text-xs text-slate-500 font-mono">
+                  {sortedWorks.length} trabajo{sortedWorks.length === 1 ? '' : 's'}
+                </span>
+              </div>
             </div>
 
+            {showHubNewFolder && onCreateFolder && (
+              <form
+                onSubmit={handleHubCreateFolder}
+                className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-slate-900/90 border border-indigo-500/35"
+              >
+                <input
+                  type="text"
+                  value={hubNewFolderName}
+                  onChange={(e) => setHubNewFolderName(e.target.value)}
+                  placeholder="Nombre de la carpeta..."
+                  autoFocus
+                  className="flex-1 min-w-[180px] bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+                <div className="flex items-center gap-1.5">
+                  {HUB_FOLDER_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setHubNewFolderColor(c)}
+                      className={`w-4 h-4 rounded-full ${FOLDER_COLOR_CLASSES[c].dot} ${
+                        hubNewFolderColor === c ? 'ring-2 ring-white scale-110' : 'opacity-65'
+                      }`}
+                      title={c}
+                    />
+                  ))}
+                </div>
+                <button
+                  type="submit"
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
+                >
+                  Crear carpeta
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowHubNewFolder(false)}
+                  className="px-2.5 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white"
+                >
+                  Cancelar
+                </button>
+              </form>
+            )}
+
+            {folders.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedFolderFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    selectedFolderFilter === 'all'
+                      ? 'bg-indigo-600/25 border-indigo-400 text-white'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Todas ({works.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFolderFilter('unfiled')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    selectedFolderFilter === 'unfiled'
+                      ? 'bg-indigo-600/25 border-indigo-400 text-white'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Sin carpeta ({works.filter((w) => !w.folderId || !validFolderIds.has(w.folderId)).length})
+                </button>
+                {folders.map((f) => {
+                  const count = works.filter((w) => w.folderId === f.id).length;
+                  const c = FOLDER_COLOR_CLASSES[f.color || 'indigo'];
+                  const active = selectedFolderFilter === f.id;
+                  return (
+                    <div
+                      key={f.id}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                        active
+                          ? 'bg-indigo-600/25 border-indigo-400 text-white'
+                          : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFolderFilter(f.id)}
+                        className="inline-flex items-center gap-1.5"
+                      >
+                        <span className={`w-2 h-2 rounded-full ${c.dot}`} />
+                        <span>{f.name}</span>
+                        <span className="text-[10px] font-mono text-slate-400">({count})</span>
+                      </button>
+                      {onDeleteFolder && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (selectedFolderFilter === f.id) {
+                              setSelectedFolderFilter('all');
+                            }
+                            onDeleteFolder(f);
+                          }}
+                          className="text-slate-500 hover:text-rose-400 ml-0.5"
+                          title="Eliminar carpeta"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {sortedWorks.length === 0 ? (
+              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-6 text-center text-xs text-slate-400">
+                No hay redacciones en esta carpeta todavía.
+              </div>
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {sortedWorks.map((work) => {
                 const targetPct =
@@ -491,6 +664,36 @@ export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
                       </div>
                     </div>
 
+                    {onMoveWorkToFolder && folders.length > 0 && (
+                      <div
+                        className="mt-3 pt-2 border-t border-slate-800/70 flex items-center justify-between gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="text-[10px] text-slate-500 inline-flex items-center gap-1">
+                          <Folder className="w-3 h-3" />
+                          <span>Carpeta</span>
+                        </span>
+                        <select
+                          value={
+                            work.folderId && validFolderIds.has(work.folderId)
+                              ? work.folderId
+                              : ''
+                          }
+                          onChange={(e) =>
+                            void onMoveWorkToFolder(work.id, e.target.value || null)
+                          }
+                          className="bg-slate-950 border border-slate-800 hover:border-indigo-500/40 rounded-lg px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-indigo-500 max-w-[160px]"
+                        >
+                          <option value="">Sin carpeta</option>
+                          {folders.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <div className="pt-3 mt-3 border-t border-slate-800/80 flex items-center justify-end">
                       <button
                         type="button"
@@ -505,6 +708,7 @@ export const TemplatesWelcomeHub: React.FC<TemplatesWelcomeHubProps> = ({
                 );
               })}
             </div>
+            )}
           </div>
         )}
 

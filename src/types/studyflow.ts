@@ -11,6 +11,7 @@ export interface StudyWorkDraft {
   createdAt: string;
   updatedAt: string;
   linkedDocId?: string | null;
+  folderId?: string | null;
   paperSize?: 'letter' | 'legal' | 'a4';
   ownerId?: string;
   ownerUsername?: string | null;

@@ -29,6 +29,7 @@ import { AcademicStyleProfile, parseMarkdownToHtml, isMarkdownContent } from '..
 import {
   CommunityTemplateRecord,
   DocumentRecord,
+  FolderColor,
   FolderRecord,
   FriendshipRecord,
   LayoutStyleId,
@@ -51,6 +52,9 @@ interface StudyWriterProps {
   notes: StickyNoteRecord[];
   documents: DocumentRecord[];
   folders: FolderRecord[];
+  onCreateFolder?: (name: string, color: FolderColor) => Promise<void>;
+  onDeleteFolder?: (folder: FolderRecord) => void;
+  onMoveWorkToFolder?: (workId: string, folderId: string | null) => Promise<void>;
   onSaveWork: (work: StudyWorkDraft) => Promise<void>;
   onCreateNewWork?: (template?: AcademicTemplate | null) => Promise<StudyWorkDraft>;
   onDeleteWork?: (id: string) => Promise<void>;
@@ -79,6 +83,9 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
   notes,
   documents,
   folders,
+  onCreateFolder,
+  onDeleteFolder,
+  onMoveWorkToFolder,
   onSaveWork,
   onCreateNewWork,
   onDeleteWork,
@@ -1019,6 +1026,10 @@ export const StudyWriter: React.FC<StudyWriterProps> = ({
       >
         <TemplatesWelcomeHub
           works={works}
+          folders={folders}
+          onCreateFolder={onCreateFolder}
+          onDeleteFolder={onDeleteFolder}
+          onMoveWorkToFolder={onMoveWorkToFolder}
           onSelectTemplate={handleSelectTemplateFromHub}
           onSelectCommunityTemplate={handleSelectCommunityTemplateFromHub}
           onOpenWork={(id) => onSelectWork?.(id)}
